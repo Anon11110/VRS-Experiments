@@ -32,7 +32,7 @@ conda install opencv numpy scikit-image
 ### Basic Command
 
 ```bash
-python vrs_simulator.py -i <input_image> -o <output_image> -p <policy>
+python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <hardware_vrs_image>]
 ```
 
 ### Parameters
@@ -40,6 +40,7 @@ python vrs_simulator.py -i <input_image> -o <output_image> -p <policy>
 - `-i, --input`: Path to the native resolution input image (required)
 - `-o, --output`: Path for the output simulated image (required)
 - `-p, --policy`: VRS policy to apply (required)
+- `-hw, --hardware`: Path to hardware VRS image for comparison (optional)
 
 ### Available Policies
 
@@ -49,24 +50,49 @@ python vrs_simulator.py -i <input_image> -o <output_image> -p <policy>
 4. **`4x4_gradient`** - Gradient propagation using bilinear interpolation
 5. **`4x4_aware`** - Content-aware luminance sampling
 
+### Typical Workflow
+
+When you have hardware VRS output from your GPU:
+
+1. Capture a native resolution image from your renderer
+2. Capture the hardware VRS output for the same frame
+3. Run the simulator to compare different policies against both the native and hardware images
+
+```bash
+# Compare simulated policy with hardware VRS
+python vrs_simulator.py -i native.png -o sim_4x4.png -p 4x4 -hw hardware_vrs.png
+```
+
+This will show three comparisons:
+- Simulated VRS vs Native (quality loss from simulation)
+- Hardware VRS vs Native (quality loss from real GPU)
+- Simulated VRS vs Hardware VRS (how well simulation matches hardware)
+
 ### Examples
 
-Test all policies on a single image:
+**Without hardware VRS (basic usage):**
 ```bash
-# 2x2 standard centroid
+# Test a single policy against native resolution
 python vrs_simulator.py -i scene.png -o scene_2x2.png -p 2x2
+```
 
-# 4x4 standard centroid
-python vrs_simulator.py -i scene.png -o scene_4x4.png -p 4x4
+**With hardware VRS (full comparison):**
+```bash
+# Compare simulation with hardware VRS output
+python vrs_simulator.py -i native_scene.png -o sim_4x4.png -p 4x4 -hw hw_vrs_scene.png
 
-# 4x4 center-weighted blend
-python vrs_simulator.py -i scene.png -o scene_4x4_blend.png -p 4x4_blend
+# Test if gradient policy matches hardware better
+python vrs_simulator.py -i native_scene.png -o sim_gradient.png -p 4x4_gradient -hw hw_vrs_scene.png
+```
 
-# 4x4 gradient propagation
-python vrs_simulator.py -i scene.png -o scene_4x4_gradient.png -p 4x4_gradient
-
-# 4x4 content-aware luminance
-python vrs_simulator.py -i scene.png -o scene_4x4_aware.png -p 4x4_aware
+**Batch testing multiple policies:**
+```bash
+# Test all policies against the same hardware VRS
+python vrs_simulator.py -i native.png -o sim_2x2.png -p 2x2 -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_4x4.png -p 4x4 -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_blend.png -p 4x4_blend -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_gradient.png -p 4x4_gradient -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_aware.png -p 4x4_aware -hw hardware.png
 ```
 
 ### Generate Test Image
@@ -80,23 +106,73 @@ This creates `test_input.png` with various patterns suitable for VRS testing.
 
 ## Output
 
-The tool provides:
+### Without Hardware VRS Image
 
-1. **Simulated Image**: Saved to the specified output path
-2. **Quality Metrics**: Printed to console
-   - MSE (Mean Squared Error) - Lower is better
-   - PSNR (Peak Signal-to-Noise Ratio) in dB - Higher is better
-   - SSIM (Structural Similarity Index) - Higher is better (1.0 is perfect)
+When running without the `-hw` parameter, you get:
+- Simulated VRS image saved to output path
+- Quality metrics comparing simulated vs native
 
-Example output:
+Example:
 ```
-Running policy: 4x4_blend...
-Calculating image quality metrics...
-  - MSE: 154.21 (Lower is better)
-  - PSNR: 26.25 dB (Higher is better)
-  - SSIM: 0.9581 (Higher is better, 1.0 is perfect)
-Success! Image saved to scene_4x4_blend.png
+Running policy: 2x2...
+
+============================================================
+QUALITY METRICS COMPARISON
+============================================================
+
+Simulated VRS (2x2) vs Native Resolution:
+------------------------------------------------------------
+  MSE:     282.85  (Lower is better)
+  PSNR:     23.62 dB  (Higher is better)
+  SSIM:   0.8959  (Higher is better, 1.0 is perfect)
+============================================================
+
+Success! Simulated VRS image saved to scene_2x2.png
 ```
+
+### With Hardware VRS Image
+
+When running with the `-hw` parameter, you get three-way comparison:
+- Simulated VRS vs Native (quality loss from simulation)
+- Hardware VRS vs Native (quality loss from real GPU)
+- Simulated VRS vs Hardware VRS (how accurately the policy models hardware)
+
+Example:
+```
+Running policy: 4x4...
+
+============================================================
+QUALITY METRICS COMPARISON
+============================================================
+
+Simulated VRS (4x4) vs Native Resolution:
+------------------------------------------------------------
+  MSE:      756.32  (Lower is better)
+  PSNR:      19.34 dB  (Higher is better)
+  SSIM:    0.7842  (Higher is better, 1.0 is perfect)
+
+Hardware VRS vs Native Resolution:
+------------------------------------------------------------
+  MSE:      789.45  (Lower is better)
+  PSNR:      19.15 dB  (Higher is better)
+  SSIM:    0.7756  (Higher is better, 1.0 is perfect)
+
+Simulated VRS (4x4) vs Hardware VRS:
+------------------------------------------------------------
+  MSE:       45.67  (Lower is better - shows similarity)
+  PSNR:      31.53 dB  (Higher is better)
+  SSIM:    0.9823  (Higher is better, 1.0 is perfect)
+
+============================================================
+SUMMARY
+============================================================
+Simulated policy matches hardware: EXCELLENT (SSIM > 0.95)
+============================================================
+
+Success! Simulated VRS image saved to sim_4x4.png
+```
+
+The summary helps you quickly understand if your simulated policy accurately models the hardware behavior.
 
 ## Policy Descriptions
 

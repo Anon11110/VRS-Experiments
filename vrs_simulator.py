@@ -40,6 +40,8 @@ def main():
     parser.add_argument("-p", "--policy", required=True, type=str,
                         choices=["2x2", "4x4", "4x4_blend", "4x4_gradient", "4x4_aware"],
                         help="VRS policy to apply")
+    parser.add_argument("-hw", "--hardware", type=str,
+                        help="Path to hardware VRS image for comparison (optional)")
 
     args = parser.parse_args()
 
@@ -48,6 +50,19 @@ def main():
     if native_image is None:
         print(f"Error: Could not load image from {args.input}")
         return 1
+
+    # Load hardware VRS image if provided
+    hardware_image = None
+    if args.hardware:
+        hardware_image = cv2.imread(args.hardware)
+        if hardware_image is None:
+            print(f"Error: Could not load hardware VRS image from {args.hardware}")
+            return 1
+
+        # Check dimensions match
+        if hardware_image.shape != native_image.shape:
+            print(f"Error: Hardware VRS image dimensions {hardware_image.shape} don't match native image {native_image.shape}")
+            return 1
 
     print(f"Running policy: {args.policy}...")
 
@@ -66,22 +81,64 @@ def main():
         print(f"Error: Unknown policy {args.policy}")
         return 1
 
-    # Calculate image quality metrics
-    print("Calculating image quality metrics...")
-    metrics = calculate_metrics(native_image, vrs_image)
+    # Calculate and display metrics
+    print("\n" + "="*60)
+    print("QUALITY METRICS COMPARISON")
+    print("="*60)
 
-    # Print metrics
-    print(f"  - MSE: {metrics['MSE']:.2f} (Lower is better)")
-    if metrics['PSNR'] == float('inf'):
-        print(f"  - PSNR: ∞ dB (Perfect match)")
+    # Simulated VRS vs Native (ground truth)
+    print(f"\nSimulated VRS ({args.policy}) vs Native Resolution:")
+    print("-" * 60)
+    metrics_sim_vs_native = calculate_metrics(native_image, vrs_image)
+    print(f"  MSE:  {metrics_sim_vs_native['MSE']:8.2f}  (Lower is better)")
+    if metrics_sim_vs_native['PSNR'] == float('inf'):
+        print(f"  PSNR:      ∞ dB  (Perfect match)")
     else:
-        print(f"  - PSNR: {metrics['PSNR']:.2f} dB (Higher is better)")
-    print(f"  - SSIM: {metrics['SSIM']:.4f} (Higher is better, 1.0 is perfect)")
+        print(f"  PSNR: {metrics_sim_vs_native['PSNR']:8.2f} dB  (Higher is better)")
+    print(f"  SSIM: {metrics_sim_vs_native['SSIM']:8.4f}  (Higher is better, 1.0 is perfect)")
+
+    # If hardware VRS image is provided, compare it
+    if hardware_image is not None:
+        print(f"\nHardware VRS vs Native Resolution:")
+        print("-" * 60)
+        metrics_hw_vs_native = calculate_metrics(native_image, hardware_image)
+        print(f"  MSE:  {metrics_hw_vs_native['MSE']:8.2f}  (Lower is better)")
+        if metrics_hw_vs_native['PSNR'] == float('inf'):
+            print(f"  PSNR:      ∞ dB  (Perfect match)")
+        else:
+            print(f"  PSNR: {metrics_hw_vs_native['PSNR']:8.2f} dB  (Higher is better)")
+        print(f"  SSIM: {metrics_hw_vs_native['SSIM']:8.4f}  (Higher is better, 1.0 is perfect)")
+
+        print(f"\nSimulated VRS ({args.policy}) vs Hardware VRS:")
+        print("-" * 60)
+        metrics_sim_vs_hw = calculate_metrics(hardware_image, vrs_image)
+        print(f"  MSE:  {metrics_sim_vs_hw['MSE']:8.2f}  (Lower is better - shows similarity)")
+        if metrics_sim_vs_hw['PSNR'] == float('inf'):
+            print(f"  PSNR:      ∞ dB  (Perfect match)")
+        else:
+            print(f"  PSNR: {metrics_sim_vs_hw['PSNR']:8.2f} dB  (Higher is better)")
+        print(f"  SSIM: {metrics_sim_vs_hw['SSIM']:8.4f}  (Higher is better, 1.0 is perfect)")
+
+        # Summary
+        print("\n" + "="*60)
+        print("SUMMARY")
+        print("="*60)
+        print(f"Simulated policy matches hardware: ", end="")
+        if metrics_sim_vs_hw['SSIM'] > 0.95:
+            print("EXCELLENT (SSIM > 0.95)")
+        elif metrics_sim_vs_hw['SSIM'] > 0.85:
+            print("GOOD (SSIM > 0.85)")
+        elif metrics_sim_vs_hw['SSIM'] > 0.70:
+            print("FAIR (SSIM > 0.70)")
+        else:
+            print("POOR (SSIM < 0.70)")
+
+    print("="*60 + "\n")
 
     # Save the output image
     success = cv2.imwrite(args.output, vrs_image)
     if success:
-        print(f"Success! Image saved to {args.output}")
+        print(f"Success! Simulated VRS image saved to {args.output}")
     else:
         print(f"Error: Could not save image to {args.output}")
         return 1

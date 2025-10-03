@@ -2,24 +2,66 @@ import cv2
 import numpy as np
 
 
-def standard_centroid(native_image, shading_rate):
+def average_color(native_image, shading_rate):
     """
-    Policy 1: Standard Centroid
-    Baseline policy that mimics common hardware VRS implementation.
+    Policy: Average Color (Default for 2x2 and 4x4)
+    Simulates hardware VRS with bilinear filtering by averaging all pixels in each block.
+    This is the most accurate simulation of real GPU VRS behavior.
 
     Args:
         native_image: Input image in BGR format
         shading_rate: 2 for 2x2 blocks, 4 for 4x4 blocks
 
     Returns:
-        Simulated VRS image
+        Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
     vrs_image = native_image.copy()
+    sample_count = 0
 
     # Process image in blocks
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
+            # Calculate block boundaries
+            block_height = min(shading_rate, height - y)
+            block_width = min(shading_rate, width - x)
+
+            # Extract the block
+            block = native_image[y:y+block_height, x:x+block_width]
+
+            # Calculate average color of all pixels in the block
+            avg_color = np.mean(block, axis=(0, 1)).astype(np.uint8)
+
+            # Propagate the average color to all pixels in the block
+            vrs_image[y:y+block_height, x:x+block_width] = avg_color
+
+    return vrs_image, sample_count
+
+
+def standard_centroid(native_image, shading_rate):
+    """
+    Policy: Standard Centroid (Nearest-Neighbor)
+    Simulates hardware VRS with nearest-neighbor filtering by sampling the center pixel.
+    Less accurate than average_color but useful for testing nearest-neighbor scenarios.
+
+    Args:
+        native_image: Input image in BGR format
+        shading_rate: 2 for 2x2 blocks, 4 for 4x4 blocks
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    height, width, channels = native_image.shape
+    vrs_image = native_image.copy()
+    sample_count = 0
+
+    # Process image in blocks
+    for y in range(0, height, shading_rate):
+        for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
             # Calculate block boundaries
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
@@ -32,7 +74,7 @@ def standard_centroid(native_image, shading_rate):
             # Propagate to all pixels in the block
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
-    return vrs_image
+    return vrs_image, sample_count
 
 
 def center_weighted_blend(native_image):
@@ -44,15 +86,18 @@ def center_weighted_blend(native_image):
         native_image: Input image in BGR format
 
     Returns:
-        Simulated VRS image
+        Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
     vrs_image = native_image.copy()
     shading_rate = 4
+    sample_count = 0
 
     # Process image in 4x4 blocks
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
+            sample_count += 1  # One blended result per block
+
             # Calculate block boundaries
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
@@ -88,7 +133,7 @@ def center_weighted_blend(native_image):
             # Propagate to all pixels in the block
             vrs_image[y:y+block_height, x:x+block_width] = blended_color
 
-    return vrs_image
+    return vrs_image, sample_count
 
 
 def content_aware_luminance(native_image):
@@ -100,11 +145,12 @@ def content_aware_luminance(native_image):
         native_image: Input image in BGR format
 
     Returns:
-        Simulated VRS image
+        Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
     vrs_image = native_image.copy()
     shading_rate = 4
+    sample_count = 0
 
     # Convert to grayscale for luminance calculation
     gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY)
@@ -112,6 +158,8 @@ def content_aware_luminance(native_image):
     # Process image in 4x4 blocks
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
             # Calculate block boundaries
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
@@ -128,7 +176,7 @@ def content_aware_luminance(native_image):
             # Propagate to all pixels in the block
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
-    return vrs_image
+    return vrs_image, sample_count
 
 
 def gradient_propagation(native_image):
@@ -140,15 +188,18 @@ def gradient_propagation(native_image):
         native_image: Input image in BGR format
 
     Returns:
-        Simulated VRS image
+        Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
     vrs_image = np.zeros_like(native_image, dtype=np.float64)
     shading_rate = 4
+    sample_count = 0
 
     # Process image in 4x4 blocks
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
+            sample_count += 1  # One interpolation operation per block
+
             # Calculate block boundaries
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
@@ -188,4 +239,98 @@ def gradient_propagation(native_image):
     # Convert back to uint8
     vrs_image = np.clip(vrs_image, 0, 255).astype(np.uint8)
 
-    return vrs_image
+    return vrs_image, sample_count
+
+
+def contrast_adaptive_shading(native_image, shading_rate=2, threshold=100):
+    """
+    Policy 5: Contrast-Adaptive Shading (CAS)
+    Dynamically reduces pixel shading rate in screen-space regions of low visual complexity.
+    Applies coarse shading only to blocks with low luminance variance, preserving full resolution
+    in high-detail areas.
+
+    Args:
+        native_image: Input image in BGR format
+        shading_rate: Coarse shading rate for low-variance blocks (default: 2)
+        threshold: Luminance variance threshold (lower = more conservative, higher = more aggressive)
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    height, width, channels = native_image.shape
+    vrs_image = native_image.copy()
+    sample_count = 0
+
+    # Convert to grayscale for luminance variance calculation
+    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY)
+
+    # Process image in blocks
+    for y in range(0, height, shading_rate):
+        for x in range(0, width, shading_rate):
+            # Calculate block boundaries
+            block_height = min(shading_rate, height - y)
+            block_width = min(shading_rate, width - x)
+
+            # Extract grayscale block and calculate luminance variance
+            block_gray = gray_image[y:y+block_height, x:x+block_width]
+            variance = np.var(block_gray)
+
+            # Apply coarse shading for low-variance blocks, native for high-variance
+            if variance < threshold:
+                sample_count += 1  # Coarse shaded block is 1 shader invocation
+                # Low variance: apply coarse shading (average color)
+                block_native = native_image[y:y+block_height, x:x+block_width]
+                avg_color = np.mean(block_native, axis=(0, 1)).astype(np.uint8)
+                vrs_image[y:y+block_height, x:x+block_width] = avg_color
+            else:
+                # High variance: native resolution (one shader invocation per pixel)
+                sample_count += block_height * block_width
+
+    return vrs_image, sample_count
+
+
+def stochastic_sampling(native_image, shading_rate=4, seed=None):
+    """
+    Policy 6: Stochastic Sampling
+    Improves perceptual quality of coarse shading by transforming structured blockiness
+    into unstructured high-frequency noise. Samples from a pseudo-random location within
+    each block instead of a fixed centroid.
+
+    Args:
+        native_image: Input image in BGR format
+        shading_rate: Block size for coarse shading (default: 4)
+        seed: Random seed for reproducibility (optional)
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    height, width, channels = native_image.shape
+    vrs_image = native_image.copy()
+    sample_count = 0
+
+    # Initialize random number generator
+    rng = np.random.default_rng(seed)
+
+    # Process image in blocks
+    for y in range(0, height, shading_rate):
+        for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
+            # Calculate block boundaries
+            block_height = min(shading_rate, height - y)
+            block_width = min(shading_rate, width - x)
+
+            # Generate pseudo-random offset within the block
+            rand_dy = rng.integers(0, block_height)
+            rand_dx = rng.integers(0, block_width)
+
+            # Sample from the random location
+            sample_y = y + rand_dy
+            sample_x = x + rand_dx
+
+            sampled_color = native_image[sample_y, sample_x]
+
+            # Propagate to all pixels in the block
+            vrs_image[y:y+block_height, x:x+block_width] = sampled_color
+
+    return vrs_image, sample_count

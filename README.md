@@ -44,11 +44,16 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 
 ### Available Policies
 
-1. **`2x2`** - Standard 2x2 centroid sampling
-2. **`4x4`** - Standard 4x4 centroid sampling
-3. **`4x4_blend`** - Center-weighted blend (4x4 blocks with 4 samples)
-4. **`4x4_gradient`** - Gradient propagation using bilinear interpolation
-5. **`4x4_aware`** - Content-aware luminance sampling
+**Default Policies (Averaging - Most Accurate):**
+1. **`2x2`** - 2x2 averaging (simulates bilinear filtering) **[RECOMMENDED]**
+2. **`4x4`** - 4x4 averaging (simulates bilinear filtering) **[RECOMMENDED]**
+
+**Alternative Policies:**
+3. **`2x2_centroid`** - 2x2 centroid sampling (simulates nearest-neighbor)
+4. **`4x4_centroid`** - 4x4 centroid sampling (simulates nearest-neighbor)
+5. **`4x4_blend`** - Center-weighted blend (4x4 blocks with 4 samples)
+6. **`4x4_gradient`** - Gradient propagation using bilinear interpolation
+7. **`4x4_aware`** - Content-aware luminance sampling
 
 ### Typical Workflow
 
@@ -176,25 +181,35 @@ The summary helps you quickly understand if your simulated policy accurately mod
 
 ## Policy Descriptions
 
-### Policy 1: Standard Centroid (2x2, 4x4)
-- **Description**: Baseline policy mimicking common hardware VRS
+### Average Color (2x2, 4x4) **[DEFAULT - RECOMMENDED]**
+- **Description**: Most accurate simulation of hardware VRS with bilinear filtering
+- **Sampling**: Reads all pixels in the block
+- **Propagation**: Calculates and broadcasts the average color
+- **Use Case**: This is the most realistic simulation of how GPU hardware VRS works with standard texture filtering
+
+### Standard Centroid (2x2_centroid, 4x4_centroid)
+- **Description**: Simulates hardware VRS with nearest-neighbor filtering
 - **Sampling**: Single sample from block center
 - **Propagation**: Broadcasts color to all pixels in block
+- **Use Case**: Useful for testing nearest-neighbor scenarios or comparing against averaging
 
-### Policy 2: Center-Weighted Blend (4x4_blend)
+### Center-Weighted Blend (4x4_blend)
 - **Description**: Hybrid policy for improved 4x4 quality
 - **Sampling**: Four samples from 2x2 sub-quadrant centers
 - **Propagation**: Averages samples and broadcasts result
+- **Use Case**: Research policy to test if strategic sampling can improve quality
 
-### Policy 3: Content-Aware Luminance (4x4_aware)
+### Content-Aware Luminance (4x4_aware)
 - **Description**: Advanced policy preserving bright features
 - **Sampling**: Samples brightest pixel in each block
 - **Propagation**: Broadcasts brightest pixel's color
+- **Use Case**: Research policy for scenes with many small bright highlights
 
-### Policy 4: Gradient Propagation (4x4_gradient)
+### Gradient Propagation (4x4_gradient)
 - **Description**: High-quality policy eliminating blockiness
 - **Sampling**: Four samples from block corners
 - **Propagation**: Bilinear interpolation creates smooth gradients
+- **Use Case**: Upper bound for visual quality; represents best-case VRS scenario
 
 ## Limitations
 

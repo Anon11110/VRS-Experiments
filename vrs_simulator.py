@@ -38,7 +38,9 @@ def main():
     parser.add_argument("-o", "--output", required=True, type=str,
                         help="Path for the output simulated image")
     parser.add_argument("-p", "--policy", required=True, type=str,
-                        choices=["2x2", "4x4", "4x4_blend", "4x4_gradient", "4x4_aware"],
+                        choices=["2x2", "4x4", "2x2_centroid", "4x4_centroid",
+                                 "4x4_blend", "4x4_gradient", "4x4_aware",
+                                 "2x2_cas", "4x4_cas", "4x4_stochastic"],
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
@@ -68,20 +70,44 @@ def main():
 
     # Apply the selected VRS policy
     if args.policy == "2x2":
-        vrs_image = policies.standard_centroid(native_image, shading_rate=2)
+        vrs_image, sample_count = policies.average_color(native_image, shading_rate=2)
     elif args.policy == "4x4":
-        vrs_image = policies.standard_centroid(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.average_color(native_image, shading_rate=4)
+    elif args.policy == "2x2_centroid":
+        vrs_image, sample_count = policies.standard_centroid(native_image, shading_rate=2)
+    elif args.policy == "4x4_centroid":
+        vrs_image, sample_count = policies.standard_centroid(native_image, shading_rate=4)
     elif args.policy == "4x4_blend":
-        vrs_image = policies.center_weighted_blend(native_image)
+        vrs_image, sample_count = policies.center_weighted_blend(native_image)
     elif args.policy == "4x4_gradient":
-        vrs_image = policies.gradient_propagation(native_image)
+        vrs_image, sample_count = policies.gradient_propagation(native_image)
     elif args.policy == "4x4_aware":
-        vrs_image = policies.content_aware_luminance(native_image)
+        vrs_image, sample_count = policies.content_aware_luminance(native_image)
+    elif args.policy == "2x2_cas":
+        vrs_image, sample_count = policies.contrast_adaptive_shading(native_image, shading_rate=2, threshold=100)
+    elif args.policy == "4x4_cas":
+        vrs_image, sample_count = policies.contrast_adaptive_shading(native_image, shading_rate=4, threshold=100)
+    elif args.policy == "4x4_stochastic":
+        vrs_image, sample_count = policies.stochastic_sampling(native_image, shading_rate=4)
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1
 
+    # Calculate performance metrics
+    height, width, channels = native_image.shape
+    total_pixels = height * width
+    native_sample_count = total_pixels
+    shading_reduction = ((native_sample_count - sample_count) / native_sample_count) * 100
+
     # Calculate and display metrics
+    print("\n" + "="*60)
+    print("PERFORMANCE METRICS")
+    print("="*60)
+    print(f"Native Resolution Samples:    {native_sample_count:,}")
+    print(f"VRS Policy Samples:           {sample_count:,}")
+    print(f"Shading Reduction:            {shading_reduction:.2f}%")
+    print(f"Speedup Factor:               {native_sample_count / sample_count:.2f}x")
+
     print("\n" + "="*60)
     print("QUALITY METRICS COMPARISON")
     print("="*60)

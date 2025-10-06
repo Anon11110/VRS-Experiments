@@ -2,49 +2,11 @@ import cv2
 import numpy as np
 
 
-def average_color(native_image, shading_rate):
-    """
-    Policy: Average Color (Default for 2x2 and 4x4)
-    Simulates hardware VRS with bilinear filtering by averaging all pixels in each block.
-    This is the most accurate simulation of real GPU VRS behavior.
-
-    Args:
-        native_image: Input image in BGR format
-        shading_rate: 2 for 2x2 blocks, 4 for 4x4 blocks
-
-    Returns:
-        Tuple of (simulated VRS image, sample count)
-    """
-    height, width, channels = native_image.shape
-    vrs_image = native_image.copy()
-    sample_count = 0
-
-    # Process image in blocks
-    for y in range(0, height, shading_rate):
-        for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
-
-            # Calculate block boundaries
-            block_height = min(shading_rate, height - y)
-            block_width = min(shading_rate, width - x)
-
-            # Extract the block
-            block = native_image[y:y+block_height, x:x+block_width]
-
-            # Calculate average color of all pixels in the block
-            avg_color = np.mean(block, axis=(0, 1)).astype(np.uint8)
-
-            # Propagate the average color to all pixels in the block
-            vrs_image[y:y+block_height, x:x+block_width] = avg_color
-
-    return vrs_image, sample_count
-
-
 def standard_centroid(native_image, shading_rate):
     """
-    Policy: Standard Centroid (Nearest-Neighbor)
+    Policy 1: Standard Centroid (Nearest-Neighbor)
     Simulates hardware VRS with nearest-neighbor filtering by sampling the center pixel.
-    Less accurate than average_color but useful for testing nearest-neighbor scenarios.
+    One shader invocation per block at the integer center coordinate.
 
     Args:
         native_image: Input image in BGR format
@@ -200,70 +162,6 @@ def content_adaptive_corner(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
-def bilinear_reconstruction(native_image):
-    """
-    Policy 4: Bilinear Reconstruction
-    High-quality policy using bilinear interpolation from corner samples.
-    Samples four corners of each block and reconstructs the interior using bilinear interpolation.
-
-    Args:
-        native_image: Input image in BGR format
-
-    Returns:
-        Tuple of (simulated VRS image, sample count)
-    """
-    height, width, channels = native_image.shape
-    vrs_image = np.zeros_like(native_image, dtype=np.float64)
-    shading_rate = 4
-    sample_count = 0
-
-    # Process image in 4x4 blocks
-    for y in range(0, height, shading_rate):
-        for x in range(0, width, shading_rate):
-            sample_count += 1  # One interpolation operation per block
-
-            # Calculate block boundaries
-            block_height = min(shading_rate, height - y)
-            block_width = min(shading_rate, width - x)
-
-            # Sample from four corners
-            # Top-left corner (x, y)
-            tl_color = native_image[y, x].astype(np.float64)
-
-            # Top-right corner (x+3, y) or rightmost valid pixel
-            tr_x = min(x + shading_rate - 1, width - 1)
-            tr_color = native_image[y, tr_x].astype(np.float64)
-
-            # Bottom-left corner (x, y+3) or bottommost valid pixel
-            bl_y = min(y + shading_rate - 1, height - 1)
-            bl_color = native_image[bl_y, x].astype(np.float64)
-
-            # Bottom-right corner (x+3, y+3) or bottom-right valid pixel
-            br_x = min(x + shading_rate - 1, width - 1)
-            br_y = min(y + shading_rate - 1, height - 1)
-            br_color = native_image[br_y, br_x].astype(np.float64)
-
-            # Perform bilinear interpolation for each pixel in the block
-            for dy in range(block_height):
-                for dx in range(block_width):
-                    # Calculate interpolation weights
-                    # Normalize to [0, 1] within the block
-                    u = dx / max(block_width - 1, 1)
-                    v = dy / max(block_height - 1, 1)
-
-                    # Bilinear interpolation
-                    top_interp = (1 - u) * tl_color + u * tr_color
-                    bottom_interp = (1 - u) * bl_color + u * br_color
-                    final_color = (1 - v) * top_interp + v * bottom_interp
-
-                    vrs_image[y + dy, x + dx] = final_color
-
-    # Convert back to uint8
-    vrs_image = np.clip(vrs_image, 0, 255).astype(np.uint8)
-
-    return vrs_image, sample_count
-
-
 def sample_bilinear(image, x, y):
     """
     Samples a color from an image at a floating-point coordinate using bilinear interpolation.
@@ -291,6 +189,46 @@ def sample_bilinear(image, x, y):
     top = (1 - u) * c00 + u * c10
     bottom = (1 - u) * c01 + u * c11
     return (1 - v) * top + v * bottom
+
+
+def center_sample_bilinear(native_image, shading_rate=4):
+    """
+    Policy: Center Sample with Bilinear Interpolation
+    Simulates VRS by invoking a single shader at the center of each block,
+    using bilinear interpolation for sub-pixel accuracy.
+
+    This is a more direct simulation of "one shader invocation per block" compared
+    to averaging, which simulates texture filtering hardware.
+
+    Args:
+        native_image: Input image in BGR format
+        shading_rate: Block size (default: 4 for 4x4)
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    height, width, channels = native_image.shape
+    vrs_image = np.zeros_like(native_image)
+    sample_count = 0
+
+    for y in range(0, height, shading_rate):
+        for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
+            block_height = min(shading_rate, height - y)
+            block_width = min(shading_rate, width - x)
+
+            # Calculate the sub-pixel coordinate for the center of the block
+            center_x = x + (block_width - 1) / 2.0
+            center_y = y + (block_height - 1) / 2.0
+
+            # Sample the color from that single point using bilinear interpolation
+            sampled_color = sample_bilinear(native_image, center_x, center_y)
+
+            # Propagate that single color to the entire block
+            vrs_image[y:y+block_height, x:x+block_width] = sampled_color
+
+    return vrs_image, sample_count
 
 
 def gradient_centroid(native_image, shading_rate=4):

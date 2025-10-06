@@ -53,11 +53,12 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 4. **`4x4_centroid`** - 4x4 centroid sampling (simulates nearest-neighbor)
 5. **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
 6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
-7. **`4x4_gradient`** - Gradient propagation using bilinear interpolation
+7. **`4x4_bilinear`** - Bilinear reconstruction from corner samples
+8. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
 
 **Dynamic Rate Policies:**
-8. **`2x2_cas`** - Contrast-Adaptive Shading (2x2 blocks)
-9. **`4x4_cas`** - Contrast-Adaptive Shading (4x4 blocks)
+9. **`2x2_cas`** - Contrast-Adaptive Shading (2x2 blocks)
+10. **`4x4_cas`** - Contrast-Adaptive Shading (4x4 blocks)
 
 ### Typical Workflow
 
@@ -90,8 +91,8 @@ python vrs_simulator.py -i scene.png -o scene_2x2.png -p 2x2
 # Compare simulation with hardware VRS output
 python vrs_simulator.py -i native_scene.png -o sim_4x4.png -p 4x4 -hw hw_vrs_scene.png
 
-# Test if gradient policy matches hardware better
-python vrs_simulator.py -i native_scene.png -o sim_gradient.png -p 4x4_gradient -hw hw_vrs_scene.png
+# Test if bilinear reconstruction policy matches hardware better
+python vrs_simulator.py -i native_scene.png -o sim_bilinear.png -p 4x4_bilinear -hw hw_vrs_scene.png
 ```
 
 **Batch testing multiple policies:**
@@ -101,7 +102,7 @@ python vrs_simulator.py -i native.png -o sim_2x2.png -p 2x2 -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_4x4.png -p 4x4 -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_cycle.png -p 4x4_corner_cycle -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_adaptive.png -p 4x4_corner_adaptive -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_gradient.png -p 4x4_gradient -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_bilinear.png -p 4x4_bilinear -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_cas.png -p 4x4_cas -hw hardware.png
 ```
 
@@ -210,11 +211,17 @@ The summary helps you quickly understand if your simulated policy accurately mod
 - **Propagation**: Broadcasts selected corner color to entire block
 - **Use Case**: Reduces edge leakage and block artifacts by selecting smoothest corner
 
-### Gradient Propagation (4x4_gradient)
-- **Description**: High-quality policy eliminating blockiness
-- **Sampling**: Four samples from block corners
-- **Propagation**: Bilinear interpolation creates smooth gradients
-- **Use Case**: Upper bound for visual quality; represents best-case VRS scenario
+### Bilinear Reconstruction (4x4_bilinear)
+- **Description**: High-quality policy using bilinear interpolation from corner samples
+- **Sampling**: Four samples from block corners (TL, TR, BL, BR)
+- **Propagation**: Bilinear interpolation reconstructs interior pixels
+- **Use Case**: Upper bound for visual quality; represents best-case VRS scenario with smooth reconstruction
+
+### Gradient Centroid (4x4_gradient_centroid)
+- **Description**: Advanced policy that samples at gradient-weighted centroid of each block
+- **Sampling**: Calculates gradient magnitude map, computes centroid weighted by gradient, samples at sub-pixel location using bilinear interpolation
+- **Propagation**: Broadcasts sampled color to entire block
+- **Use Case**: Intelligent sampling that adapts to local image structure; samples near edges/details within each block
 
 ### Contrast-Adaptive Shading (2x2_cas, 4x4_cas)
 - **Description**: Dynamic rate policy that preserves detail in high-contrast areas

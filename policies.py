@@ -200,10 +200,11 @@ def content_adaptive_corner(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
-def gradient_propagation(native_image):
+def bilinear_reconstruction(native_image):
     """
-    Policy 4: Gradient Propagation
+    Policy 4: Bilinear Reconstruction
     High-quality policy using bilinear interpolation from corner samples.
+    Samples four corners of each block and reconstructs the interior using bilinear interpolation.
 
     Args:
         native_image: Input image in BGR format
@@ -263,9 +264,94 @@ def gradient_propagation(native_image):
     return vrs_image, sample_count
 
 
+def sample_bilinear(image, x, y):
+    """
+    Samples a color from an image at a floating-point coordinate using bilinear interpolation.
+
+    Args:
+        image: Input image in BGR format
+        x: Floating-point x coordinate
+        y: Floating-point y coordinate
+
+    Returns:
+        Bilinearly interpolated color at (x, y)
+    """
+    height, width, _ = image.shape
+    x = np.clip(x, 0, width - 1)
+    y = np.clip(y, 0, height - 1)
+    x0, y0 = int(np.floor(x)), int(np.floor(y))
+    x1, y1 = min(x0 + 1, width - 1), min(y0 + 1, height - 1)
+
+    c00 = image[y0, x0].astype(np.float64)
+    c10 = image[y0, x1].astype(np.float64)
+    c01 = image[y1, x0].astype(np.float64)
+    c11 = image[y1, x1].astype(np.float64)
+
+    u, v = x - x0, y - y0
+    top = (1 - u) * c00 + u * c10
+    bottom = (1 - u) * c01 + u * c11
+    return (1 - v) * top + v * bottom
+
+
+def gradient_centroid(native_image, shading_rate=4):
+    """
+    Policy: Dynamic Gradient Centroid VRS
+    Samples at the sub-pixel centroid of the gradient magnitude within each block.
+
+    This policy calculates a gradient map, then for each block computes the centroid
+    weighted by gradient magnitude. The sample is taken at this sub-pixel location
+    using bilinear interpolation.
+
+    Args:
+        native_image: Input image in BGR format
+        shading_rate: Block size (default: 4 for 4x4)
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    height, width, channels = native_image.shape
+    vrs_image = np.zeros_like(native_image, dtype=np.float64)
+    sample_count = 0
+
+    # Stage 1: Calculate Gradient Map
+    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray_image, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray_image, cv2.CV_64F, 0, 1, ksize=3)
+    magnitude_map = cv2.magnitude(grad_x, grad_y)
+
+    # Create coordinate grids for a block to aid in centroid calculation
+    local_y, local_x = np.mgrid[0:shading_rate, 0:shading_rate]
+
+    for y in range(0, height, shading_rate):
+        for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
+            block_height = min(shading_rate, height - y)
+            block_width = min(shading_rate, width - x)
+            mag_block = magnitude_map[y:y+block_height, x:x+block_width]
+
+            # Stage 2: Calculate Centroid
+            total_magnitude = np.sum(mag_block)
+            if total_magnitude > 1e-6:  # Avoid division by zero
+                offset_y = np.sum(local_y[:block_height, :block_width] * mag_block) / total_magnitude
+                offset_x = np.sum(local_x[:block_height, :block_width] * mag_block) / total_magnitude
+            else:  # If block is flat, sample the center
+                offset_y = (block_height - 1) / 2.0
+                offset_x = (block_width - 1) / 2.0
+
+            sample_y = y + offset_y
+            sample_x = x + offset_x
+
+            # Stage 3: Sample and Replicate
+            sample_color = sample_bilinear(native_image, sample_x, sample_y)
+            vrs_image[y:y+block_height, x:x+block_width] = sample_color
+
+    return np.clip(vrs_image, 0, 255).astype(np.uint8), sample_count
+
+
 def contrast_adaptive_shading(native_image, shading_rate=2, threshold=100):
     """
-    Policy 5: Contrast-Adaptive Shading (CAS)
+    Policy: Contrast-Adaptive Shading (CAS)
     Dynamically reduces pixel shading rate in screen-space regions of low visual complexity.
     Applies coarse shading only to blocks with low luminance variance, preserving full resolution
     in high-detail areas.

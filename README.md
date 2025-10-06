@@ -51,9 +51,13 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 **Alternative Policies:**
 3. **`2x2_centroid`** - 2x2 centroid sampling (simulates nearest-neighbor)
 4. **`4x4_centroid`** - 4x4 centroid sampling (simulates nearest-neighbor)
-5. **`4x4_blend`** - Center-weighted blend (4x4 blocks with 4 samples)
-6. **`4x4_gradient`** - Gradient propagation using bilinear interpolation
-7. **`4x4_aware`** - Content-aware luminance sampling
+5. **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
+6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
+7. **`4x4_gradient`** - Gradient propagation using bilinear interpolation
+
+**Dynamic Rate Policies:**
+8. **`2x2_cas`** - Contrast-Adaptive Shading (2x2 blocks)
+9. **`4x4_cas`** - Contrast-Adaptive Shading (4x4 blocks)
 
 ### Typical Workflow
 
@@ -95,9 +99,10 @@ python vrs_simulator.py -i native_scene.png -o sim_gradient.png -p 4x4_gradient 
 # Test all policies against the same hardware VRS
 python vrs_simulator.py -i native.png -o sim_2x2.png -p 2x2 -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_4x4.png -p 4x4 -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_blend.png -p 4x4_blend -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_corner_cycle.png -p 4x4_corner_cycle -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_corner_adaptive.png -p 4x4_corner_adaptive -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_gradient.png -p 4x4_gradient -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_aware.png -p 4x4_aware -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_cas.png -p 4x4_cas -hw hardware.png
 ```
 
 ### Generate Test Image
@@ -193,23 +198,29 @@ The summary helps you quickly understand if your simulated policy accurately mod
 - **Propagation**: Broadcasts color to all pixels in block
 - **Use Case**: Useful for testing nearest-neighbor scenarios or comparing against averaging
 
-### Center-Weighted Blend (4x4_blend)
-- **Description**: Hybrid policy for improved 4x4 quality
-- **Sampling**: Four samples from 2x2 sub-quadrant centers
-- **Propagation**: Averages samples and broadcasts result
-- **Use Case**: Research policy to test if strategic sampling can improve quality
+### Corner Cycling (4x4_corner_cycle)
+- **Description**: Picks one corner per block using a tiled 2×2 cycling pattern
+- **Sampling**: Single sample from one of four corners (TL, TR, BL, BR) based on block position
+- **Propagation**: Broadcasts corner color to entire block
+- **Use Case**: Reduces banding by distributing corner samples spatially; can cycle phase per frame
 
-### Content-Aware Luminance (4x4_aware)
-- **Description**: Advanced policy preserving bright features
-- **Sampling**: Samples brightest pixel in each block
-- **Propagation**: Broadcasts brightest pixel's color
-- **Use Case**: Research policy for scenes with many small bright highlights
+### Content-Adaptive Corner (4x4_corner_adaptive)
+- **Description**: Quality-focused corner selection based on gradient analysis
+- **Sampling**: Evaluates Sobel gradient at each corner, selects corner with smallest gradient
+- **Propagation**: Broadcasts selected corner color to entire block
+- **Use Case**: Reduces edge leakage and block artifacts by selecting smoothest corner
 
 ### Gradient Propagation (4x4_gradient)
 - **Description**: High-quality policy eliminating blockiness
 - **Sampling**: Four samples from block corners
 - **Propagation**: Bilinear interpolation creates smooth gradients
 - **Use Case**: Upper bound for visual quality; represents best-case VRS scenario
+
+### Contrast-Adaptive Shading (2x2_cas, 4x4_cas)
+- **Description**: Dynamic rate policy that preserves detail in high-contrast areas
+- **Sampling**: Varies per block - coarse rate for low-variance areas, native (1x1) for high-variance
+- **Propagation**: Average color for coarse blocks, native resolution for detailed areas
+- **Use Case**: Performance optimization while preserving visual quality in important regions
 
 ## Limitations
 
@@ -236,12 +247,14 @@ To add a new policy:
 ```python
 def custom_policy(native_image, shading_rate=4):
     # Your implementation
-    return vrs_image
+    sample_count = 0
+    # ... count shader invocations
+    return vrs_image, sample_count
 ```
 
 2. Register it in `vrs_simulator.py`:
    - Add to the `choices` list in argument parser
-   - Add a conditional branch in `main()` to call your function
+   - Add a conditional branch in `main()` to call your function and unpack the tuple
 
 ## License
 

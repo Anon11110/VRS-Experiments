@@ -77,103 +77,124 @@ def standard_centroid(native_image, shading_rate):
     return vrs_image, sample_count
 
 
-def center_weighted_blend(native_image):
+def corner_cycling(native_image, shading_rate=4, phase=0):
     """
-    Policy 2: Center-Weighted Blend
-    Hybrid policy that blends multiple samples from block's interior for 4x4 blocks.
+    Policy 2: Corner Cycling
+    Pick exactly one corner per block using a tiled 2×2 cycling pattern,
+    then broadcast the sampled color to the whole block.
+
+    Corner indices: 0=TL, 1=TR, 2=BL, 3=BR
+    Pattern (per block, before phase):
+        (bx%2, by%2) = (0,0)->0, (1,0)->1, (0,1)->2, (1,1)->3
+    'phase' rotates this pattern: corner = (pattern + phase) & 3
 
     Args:
         native_image: Input image in BGR format
+        shading_rate: Block size (default: 4 for 4x4)
+        phase: Integer 0..3 (optional). Use different values per frame to "cycle".
 
     Returns:
         Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
     vrs_image = native_image.copy()
-    shading_rate = 4
     sample_count = 0
 
-    # Process image in 4x4 blocks
+    # Corner offsets inside a block for generic shading_rate
+    # TL=(0,0), TR=(w-1,0), BL=(0,h-1), BR=(w-1,h-1)
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
-            sample_count += 1  # One blended result per block
+            sample_count += 1
 
-            # Calculate block boundaries
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
 
-            # Sample from centers of four 2x2 sub-quadrants
-            samples = []
+            bx = x // shading_rate
+            by = y // shading_rate
 
-            # Top-left quadrant center (x+1, y+1)
-            if y + 1 < height and x + 1 < width:
-                samples.append(native_image[y + 1, x + 1].astype(np.float64))
+            # 2×2 cycling pattern across blocks, then rotate by 'phase'
+            pattern = (bx & 1) | ((by & 1) << 1)  # {0,1,2,3}
+            corner = (pattern + (phase & 3)) & 3
 
-            # Top-right quadrant center (x+3, y+1)
-            if y + 1 < height and x + 3 < width:
-                samples.append(native_image[y + 1, x + 3].astype(np.float64))
+            if corner == 0:        # TL
+                sx, sy = x, y
+            elif corner == 1:      # TR
+                sx, sy = x + block_width - 1, y
+            elif corner == 2:      # BL
+                sx, sy = x, y + block_height - 1
+            else:                  # BR
+                sx, sy = x + block_width - 1, y + block_height - 1
 
-            # Bottom-left quadrant center (x+1, y+3)
-            if y + 3 < height and x + 1 < width:
-                samples.append(native_image[y + 3, x + 1].astype(np.float64))
-
-            # Bottom-right quadrant center (x+3, y+3)
-            if y + 3 < height and x + 3 < width:
-                samples.append(native_image[y + 3, x + 3].astype(np.float64))
-
-            # Average the samples (or use fallback if not enough samples)
-            if samples:
-                blended_color = np.mean(samples, axis=0).astype(np.uint8)
-            else:
-                # Fallback to center sample if block is too small
-                sample_y = min(y + block_height // 2, height - 1)
-                sample_x = min(x + block_width // 2, width - 1)
-                blended_color = native_image[sample_y, sample_x]
-
-            # Propagate to all pixels in the block
-            vrs_image[y:y+block_height, x:x+block_width] = blended_color
+            sampled_color = native_image[sy, sx]
+            vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
     return vrs_image, sample_count
 
 
-def content_aware_luminance(native_image):
+def content_adaptive_corner(native_image, shading_rate=4):
     """
-    Policy 3: Content-Aware Luminance
-    Advanced policy that samples the brightest point within each 4x4 block.
+    Policy 3: Content-Adaptive Corner (quality-focused)
+    For each block, evaluate a small gradient magnitude around each corner,
+    choose the corner with the smallest gradient, then broadcast that color.
 
     Args:
         native_image: Input image in BGR format
+        shading_rate: Block size (default: 4 for 4x4)
 
     Returns:
         Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
     vrs_image = native_image.copy()
-    shading_rate = 4
     sample_count = 0
 
-    # Convert to grayscale for luminance calculation
-    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY)
+    # Convert to luma (Y) for gradient eval; keep float for math
+    # BGR to luma (BT.601-ish): Y = 0.114B + 0.587G + 0.299R
+    img = native_image.astype(np.float32)
+    luma = 0.114 * img[..., 0] + 0.587 * img[..., 1] + 0.299 * img[..., 2]
 
-    # Process image in 4x4 blocks
+    # Simple Sobel-like gradient at a pixel (clamped)
+    def grad_mag(y, x):
+        # 3x3 neighborhood indices with clamping
+        x0 = max(x - 1, 0)
+        x1 = x
+        x2 = min(x + 1, width - 1)
+        y0 = max(y - 1, 0)
+        y1 = y
+        y2 = min(y + 1, height - 1)
+
+        # Sobel kernels
+        # Gx
+        gx = (-1*luma[y0, x0] + 1*luma[y0, x2]
+              -2*luma[y1, x0] + 2*luma[y1, x2]
+              -1*luma[y2, x0] + 1*luma[y2, x2])
+        # Gy
+        gy = (-1*luma[y0, x0] - 2*luma[y0, x1] - 1*luma[y0, x2]
+              +1*luma[y2, x0] + 2*luma[y2, x1] + 1*luma[y2, x2])
+
+        return gx*gx + gy*gy  # squared magnitude is enough for ordering
+
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
+            sample_count += 1
 
-            # Calculate block boundaries
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
 
-            # Find the brightest pixel in the block
-            block_gray = gray_image[y:y+block_height, x:x+block_width]
-            max_loc = np.unravel_index(np.argmax(block_gray), block_gray.shape)
+            # Four corner coordinates (TL, TR, BL, BR)
+            corners = [
+                (x,                      y                     ),  # 0
+                (x + block_width - 1,    y                     ),  # 1
+                (x,                      y + block_height - 1  ),  # 2
+                (x + block_width - 1,    y + block_height - 1  )   # 3
+            ]
 
-            # Sample from the brightest location
-            sample_y = y + max_loc[0]
-            sample_x = x + max_loc[1]
-            sampled_color = native_image[sample_y, sample_x]
+            # Compute gradient score at each corner, choose the smallest
+            scores = [grad_mag(cy, cx) for (cx, cy) in corners]
+            best_idx = int(np.argmin(scores))
+            sx, sy = corners[best_idx]
 
-            # Propagate to all pixels in the block
+            sampled_color = native_image[sy, sx]
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
     return vrs_image, sample_count
@@ -289,48 +310,3 @@ def contrast_adaptive_shading(native_image, shading_rate=2, threshold=100):
     return vrs_image, sample_count
 
 
-def stochastic_sampling(native_image, shading_rate=4, seed=None):
-    """
-    Policy 6: Stochastic Sampling
-    Improves perceptual quality of coarse shading by transforming structured blockiness
-    into unstructured high-frequency noise. Samples from a pseudo-random location within
-    each block instead of a fixed centroid.
-
-    Args:
-        native_image: Input image in BGR format
-        shading_rate: Block size for coarse shading (default: 4)
-        seed: Random seed for reproducibility (optional)
-
-    Returns:
-        Tuple of (simulated VRS image, sample count)
-    """
-    height, width, channels = native_image.shape
-    vrs_image = native_image.copy()
-    sample_count = 0
-
-    # Initialize random number generator
-    rng = np.random.default_rng(seed)
-
-    # Process image in blocks
-    for y in range(0, height, shading_rate):
-        for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
-
-            # Calculate block boundaries
-            block_height = min(shading_rate, height - y)
-            block_width = min(shading_rate, width - x)
-
-            # Generate pseudo-random offset within the block
-            rand_dy = rng.integers(0, block_height)
-            rand_dx = rng.integers(0, block_width)
-
-            # Sample from the random location
-            sample_y = y + rand_dy
-            sample_x = x + rand_dx
-
-            sampled_color = native_image[sample_y, sample_x]
-
-            # Propagate to all pixels in the block
-            vrs_image[y:y+block_height, x:x+block_width] = sampled_color
-
-    return vrs_image, sample_count

@@ -47,16 +47,17 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 **Core VRS Policies (Single Sample per Block):**
 1. **`2x2_centroid`** - 2x2 centroid sampling (nearest-neighbor)
 2. **`4x4_centroid`** - 4x4 centroid sampling (nearest-neighbor)
-3. **`4x4_center_bilinear`** - Center-point sampling with bilinear interpolation **[RECOMMENDED]**
+3. **`2x2_center_bilinear`** - 2x2 center-point sampling with bilinear interpolation **[RECOMMENDED]**
+4. **`4x4_center_bilinear`** - 4x4 center-point sampling with bilinear interpolation **[RECOMMENDED]**
 
 **Advanced VRS Policies (Single Sample per Block):**
-4. **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
-5. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
-6. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
+5. **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
+6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
+7. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
 
 **Dynamic Rate Policies:**
-7. **`2x2_cas`** - Contrast-Adaptive Shading (2x2 blocks)
-8. **`4x4_cas`** - Contrast-Adaptive Shading (4x4 blocks)
+8. **`2x2_cas`** - Contrast-Adaptive Shading (2x2 blocks)
+9. **`4x4_cas`** - Contrast-Adaptive Shading (4x4 blocks)
 
 ### Typical Workflow
 
@@ -98,7 +99,8 @@ python vrs_simulator.py -i native_scene.png -o sim_center_bilinear.png -p 4x4_ce
 # Test all policies against the same hardware VRS
 python vrs_simulator.py -i native.png -o sim_2x2_centroid.png -p 2x2_centroid -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_4x4_centroid.png -p 4x4_centroid -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_center_bilinear.png -p 4x4_center_bilinear -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_2x2_center_bilinear.png -p 2x2_center_bilinear -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_4x4_center_bilinear.png -p 4x4_center_bilinear -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_cycle.png -p 4x4_corner_cycle -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_adaptive.png -p 4x4_corner_adaptive -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_gradient_centroid.png -p 4x4_gradient_centroid -hw hardware.png
@@ -193,7 +195,7 @@ The summary helps you quickly understand if your simulated policy accurately mod
 - **Samples per Block**: 1 (at integer coordinate)
 - **Use Case**: Simple VRS simulation; fastest but may produce blocky artifacts
 
-### Center Sample Bilinear (4x4_center_bilinear) **[RECOMMENDED]**
+### Center Sample Bilinear (2x2_center_bilinear, 4x4_center_bilinear) **[RECOMMENDED]**
 - **Description**: Direct simulation of one shader invocation at block center with sub-pixel accuracy
 - **Sampling**: Single sample at sub-pixel center coordinate using bilinear interpolation
 - **Propagation**: Broadcasts sampled color to entire block

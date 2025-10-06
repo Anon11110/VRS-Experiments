@@ -27,7 +27,6 @@ venv.bak/
 .DS_Store
 
 # Test outputs
-*.png
 !test_input.png
 
 # Jupyter Notebooks

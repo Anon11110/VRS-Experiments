@@ -95,67 +95,59 @@ def corner_cycling(native_image, shading_rate=4, phase=0):
 
 def content_adaptive_corner(native_image, shading_rate=4):
     """
-    Policy 3: Content-Adaptive Corner (quality-focused)
-    For each block, evaluate a small gradient magnitude around each corner,
+    Policy: Content-Adaptive Corner
+    For each block, evaluate the color gradient (ddx/ddy) at each corner,
     choose the corner with the smallest gradient, then broadcast that color.
-
-    Args:
-        native_image: Input image in BGR format
-        shading_rate: Block size (default: 4 for 4x4)
-
-    Returns:
-        Tuple of (simulated VRS image, sample count)
     """
-    height, width, channels = native_image.shape
+    height, width, _ = native_image.shape
     vrs_image = native_image.copy()
     sample_count = 0
 
-    # Convert to luma (Y) for gradient eval; keep float for math
-    # BGR to luma (BT.601-ish): Y = 0.114B + 0.587G + 0.299R
+    # Use the image directly as a float for math
     img = native_image.astype(np.float32)
-    luma = 0.114 * img[..., 0] + 0.587 * img[..., 1] + 0.299 * img[..., 2]
 
-    # Simple Sobel-like gradient at a pixel (clamped)
-    def grad_mag(y, x):
+    def grad_mag_color(y, x):
+        """
+        Calculates the gradient magnitude from BGR color vectors using
+        a Sobel-like operator.
+        """
         # 3x3 neighborhood indices with clamping
-        x0 = max(x - 1, 0)
-        x1 = x
-        x2 = min(x + 1, width - 1)
-        y0 = max(y - 1, 0)
-        y1 = y
-        y2 = min(y + 1, height - 1)
+        x0, x1, x2 = max(x - 1, 0), x, min(x + 1, width - 1)
+        y0, y1, y2 = max(y - 1, 0), y, min(y + 1, height - 1)
 
-        # Sobel kernels
-        # Gx
-        gx = (-1*luma[y0, x0] + 1*luma[y0, x2]
-              -2*luma[y1, x0] + 2*luma[y1, x2]
-              -1*luma[y2, x0] + 1*luma[y2, x2])
-        # Gy
-        gy = (-1*luma[y0, x0] - 2*luma[y0, x1] - 1*luma[y0, x2]
-              +1*luma[y2, x0] + 2*luma[y2, x1] + 1*luma[y2, x2])
+        # Get the 3-channel color vectors for the 3x3 neighborhood
+        c00, c01, c02 = img[y0, x0], img[y0, x1], img[y0, x2]
+        c10,       c12 = img[y1, x0],            img[y1, x2]
+        c20, c21, c22 = img[y2, x0], img[y2, x1], img[y2, x2]
 
-        return gx*gx + gy*gy  # squared magnitude is enough for ordering
+        # Apply Sobel operator to the color vectors to get gradient vectors
+        # gx_vec will be a vector like [gx_B, gx_G, gx_R]
+        gx_vec = (-1*c00 + 1*c02 - 2*c10 + 2*c12 - 1*c20 + 1*c22)
+        gy_vec = (-1*c00 - 2*c01 - 1*c02 + 1*c20 + 2*c21 + 1*c22)
+
+        # Sum the squared components of both gradient vectors
+        # This is |gx_vec|^2 + |gy_vec|^2
+        return np.sum(gx_vec**2) + np.sum(gy_vec**2)
 
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
             sample_count += 1
-
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
 
-            # Four corner coordinates (TL, TR, BL, BR)
             corners = [
-                (x,                      y                     ),  # 0
-                (x + block_width - 1,    y                     ),  # 1
-                (x,                      y + block_height - 1  ),  # 2
-                (x + block_width - 1,    y + block_height - 1  )   # 3
+                (x,                   y),
+                (x + block_width - 1, y),
+                (x,                   y + block_height - 1),
+                (x + block_width - 1, y + block_height - 1)
             ]
 
             # Compute gradient score at each corner, choose the smallest
-            scores = [grad_mag(cy, cx) for (cx, cy) in corners]
+            scores = [grad_mag_color(cy, cx) for (cx, cy) in corners]
             best_idx = int(np.argmin(scores))
             sx, sy = corners[best_idx]
 
+            # Propagate the color from the "most stable" corner
             sampled_color = native_image[sy, sx]
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 

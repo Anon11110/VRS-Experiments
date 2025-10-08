@@ -40,7 +40,8 @@ def main():
     parser.add_argument("-p", "--policy", required=True, type=str,
                         choices=["2x2_centroid_nearest_neighbor", "4x4_centroid_nearest_neighbor",
                                  "2x2_center_bilinear", "4x4_center_bilinear", "4x4_corner_cycle",
-                                 "4x4_corner_adaptive", "4x4_gradient_centroid", "4x4_minimum_gradient"],
+                                 "4x4_corner_adaptive", "4x4_gradient_centroid",
+                                 "4x4_minimum_gradient", "4x4_maximum_gradient"],
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
@@ -84,7 +85,9 @@ def main():
     elif args.policy == "4x4_gradient_centroid":
         vrs_image, sample_count = policies.gradient_centroid(native_image, shading_rate=4)
     elif args.policy == "4x4_minimum_gradient":
-        vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.minimum_gradient_ddx_ddy(native_image, shading_rate=4)
+    elif args.policy == "4x4_maximum_gradient":
+        vrs_image, sample_count = policies.maximum_gradient_ddx_ddy(native_image, shading_rate=4)
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1

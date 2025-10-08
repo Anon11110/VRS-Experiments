@@ -361,3 +361,72 @@ def minimum_gradient(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
+def maximum_gradient_ddx_ddy(native_image, shading_rate=4):
+    """
+    Policy: Maximum Gradient (using ddx/ddy)
+    Selects the pixel with the maximum gradient magnitude within each block,
+    using GPU-style ddx/ddy gradient calculation.
+
+    This is a more aggressive approach that samples at edges/details. While it can
+    preserve edge information, it's riskier as it may pick outliers (e.g., bright
+    highlights) and smear them across the block, creating visible artifacts.
+
+    Uses ddx (horizontal gradient) and ddy (vertical gradient) to mimic GPU shader
+    derivative functions for gradient calculation.
+
+    Args:
+        native_image: Input image in BGR format
+        shading_rate: Block size (default: 4 for 4x4)
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    height, width, channels = native_image.shape
+    vrs_image = native_image.copy()
+    sample_count = 0
+
+    # Convert to grayscale for gradient calculation
+    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+    # Calculate ddx (horizontal gradient) and ddy (vertical gradient)
+    # Using simple finite differences to mimic GPU ddx/ddy
+    ddx = np.zeros_like(gray_image)
+    ddy = np.zeros_like(gray_image)
+
+    # ddx: horizontal gradient (difference with right neighbor)
+    ddx[:, :-1] = gray_image[:, 1:] - gray_image[:, :-1]
+    ddx[:, -1] = 0  # Edge case: last column has no right neighbor
+
+    # ddy: vertical gradient (difference with bottom neighbor)
+    ddy[:-1, :] = gray_image[1:, :] - gray_image[:-1, :]
+    ddy[-1, :] = 0  # Edge case: last row has no bottom neighbor
+
+    # Calculate gradient magnitude: sqrt(ddx^2 + ddy^2)
+    magnitude_map = np.sqrt(ddx**2 + ddy**2)
+
+    # Process image in blocks
+    for y in range(0, height, shading_rate):
+        for x in range(0, width, shading_rate):
+            sample_count += 1  # One shader invocation per block
+
+            # Calculate block boundaries
+            block_height = min(shading_rate, height - y)
+            block_width = min(shading_rate, width - x)
+
+            # Extract gradient magnitude for this block
+            mag_block = magnitude_map[y:y+block_height, x:x+block_width]
+
+            # Find the pixel with maximum gradient (edge/detail pixel)
+            max_loc = np.unravel_index(np.argmax(mag_block), mag_block.shape)
+
+            # Sample from the maximum gradient location
+            sample_y = y + max_loc[0]
+            sample_x = x + max_loc[1]
+            sampled_color = native_image[sample_y, sample_x]
+
+            # Propagate to all pixels in the block
+            vrs_image[y:y+block_height, x:x+block_width] = sampled_color
+
+    return vrs_image, sample_count
+
+

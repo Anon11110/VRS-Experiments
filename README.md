@@ -55,6 +55,7 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
 7. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
 8. **`4x4_minimum_gradient`** - Minimum gradient magnitude sampling (safest/most robust)
+9. **`4x4_maximum_gradient`** - Maximum gradient magnitude sampling (edge-preserving but risky)
 
 ### Typical Workflow
 
@@ -102,6 +103,7 @@ python vrs_simulator.py -i native.png -o sim_corner_cycle.png -p 4x4_corner_cycl
 python vrs_simulator.py -i native.png -o sim_corner_adaptive.png -p 4x4_corner_adaptive -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_gradient_centroid.png -p 4x4_gradient_centroid -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_minimum_gradient.png -p 4x4_minimum_gradient -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_maximum_gradient.png -p 4x4_maximum_gradient -hw hardware.png
 ```
 
 ### Generate Test Image
@@ -226,6 +228,13 @@ The summary helps you quickly understand if your simulated policy accurately mod
 - **Propagation**: Broadcasts sampled color to entire block
 - **Samples per Block**: 1 (at minimum gradient location)
 - **Use Case**: Best for maintaining visual quality by avoiding sampling from sharp edges or highlights; minimizes risk of smearing artifacts
+
+### Maximum Gradient (4x4_maximum_gradient)
+- **Description**: Aggressive edge-preserving VRS policy (experimental/risky)
+- **Sampling**: Uses GPU-style ddx/ddy derivatives to calculate gradient magnitude, selects pixel with maximum gradient (edge/detail pixel)
+- **Propagation**: Broadcasts sampled color to entire block
+- **Samples per Block**: 1 (at maximum gradient location)
+- **Use Case**: Attempts to preserve edges but risky; may sample outliers (e.g., bright highlights) and create visible smearing artifacts
 
 ## Limitations
 

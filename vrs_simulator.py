@@ -38,9 +38,9 @@ def main():
     parser.add_argument("-o", "--output", required=True, type=str,
                         help="Path for the output simulated image")
     parser.add_argument("-p", "--policy", required=True, type=str,
-                        choices=["2x2_centroid", "4x4_centroid", "2x2_center_bilinear",
-                                 "4x4_center_bilinear", "4x4_corner_cycle", "4x4_corner_adaptive",
-                                 "4x4_gradient_centroid"],
+                        choices=["2x2_centroid_nearest_neighbor", "4x4_centroid_nearest_neighbor",
+                                 "2x2_center_bilinear", "4x4_center_bilinear", "4x4_corner_cycle",
+                                 "4x4_corner_adaptive", "4x4_gradient_centroid", "4x4_minimum_gradient"],
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
@@ -69,9 +69,9 @@ def main():
     print(f"Running policy: {args.policy}...")
 
     # Apply the selected VRS policy
-    if args.policy == "2x2_centroid":
+    if args.policy == "2x2_centroid_nearest_neighbor":
         vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=2)
-    elif args.policy == "4x4_centroid":
+    elif args.policy == "4x4_centroid_nearest_neighbor":
         vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=4)
     elif args.policy == "2x2_center_bilinear":
         vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=2)
@@ -83,6 +83,8 @@ def main():
         vrs_image, sample_count = policies.content_adaptive_corner(native_image, shading_rate=4)
     elif args.policy == "4x4_gradient_centroid":
         vrs_image, sample_count = policies.gradient_centroid(native_image, shading_rate=4)
+    elif args.policy == "4x4_minimum_gradient":
+        vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=4)
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1

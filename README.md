@@ -45,8 +45,8 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 ### Available Policies
 
 **Core VRS Policies (Single Sample per Block):**
-1. **`2x2_centroid`** - 2x2 centroid sampling (nearest-neighbor)
-2. **`4x4_centroid`** - 4x4 centroid sampling (nearest-neighbor)
+1. **`2x2_centroid_nearest_neighbor`** - 2x2 centroid sampling (nearest-neighbor)
+2. **`4x4_centroid_nearest_neighbor`** - 4x4 centroid sampling (nearest-neighbor)
 3. **`2x2_center_bilinear`** - 2x2 center-point sampling with bilinear interpolation **[RECOMMENDED]**
 4. **`4x4_center_bilinear`** - 4x4 center-point sampling with bilinear interpolation **[RECOMMENDED]**
 
@@ -54,6 +54,7 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 5. **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
 6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
 7. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
+8. **`4x4_minimum_gradient`** - Minimum gradient magnitude sampling (safest/most robust)
 
 ### Typical Workflow
 
@@ -78,13 +79,13 @@ This will show three comparisons:
 **Without hardware VRS (basic usage):**
 ```bash
 # Test a single policy against native resolution
-python vrs_simulator.py -i scene.png -o scene_4x4_centroid.png -p 4x4_centroid
+python vrs_simulator.py -i scene.png -o scene_4x4.png -p 4x4_centroid_nearest_neighbor
 ```
 
 **With hardware VRS (full comparison):**
 ```bash
 # Compare simulation with hardware VRS output
-python vrs_simulator.py -i native_scene.png -o sim_4x4_centroid.png -p 4x4_centroid -hw hw_vrs_scene.png
+python vrs_simulator.py -i native_scene.png -o sim_4x4.png -p 4x4_centroid_nearest_neighbor -hw hw_vrs_scene.png
 
 # Test if center bilinear policy matches hardware better
 python vrs_simulator.py -i native_scene.png -o sim_center_bilinear.png -p 4x4_center_bilinear -hw hw_vrs_scene.png
@@ -93,13 +94,14 @@ python vrs_simulator.py -i native_scene.png -o sim_center_bilinear.png -p 4x4_ce
 **Batch testing multiple policies:**
 ```bash
 # Test all policies against the same hardware VRS
-python vrs_simulator.py -i native.png -o sim_2x2_centroid.png -p 2x2_centroid -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_4x4_centroid.png -p 4x4_centroid -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_2x2_center_bilinear.png -p 2x2_center_bilinear -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_4x4_center_bilinear.png -p 4x4_center_bilinear -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_2x2_nn.png -p 2x2_centroid_nearest_neighbor -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_4x4_nn.png -p 4x4_centroid_nearest_neighbor -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_2x2_bilinear.png -p 2x2_center_bilinear -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_4x4_bilinear.png -p 4x4_center_bilinear -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_cycle.png -p 4x4_corner_cycle -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_adaptive.png -p 4x4_corner_adaptive -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_gradient_centroid.png -p 4x4_gradient_centroid -hw hardware.png
+python vrs_simulator.py -i native.png -o sim_minimum_gradient.png -p 4x4_minimum_gradient -hw hardware.png
 ```
 
 ### Generate Test Image
@@ -183,7 +185,7 @@ The summary helps you quickly understand if your simulated policy accurately mod
 
 ## Policy Descriptions
 
-### Nearest-Neighbor Filtering Centroid (2x2_centroid, 4x4_centroid)
+### Nearest-Neighbor Filtering Centroid (2x2_centroid_nearest_neighbor, 4x4_centroid_nearest_neighbor)
 - **Description**: Basic VRS with nearest-neighbor filtering
 - **Sampling**: Single sample from integer pixel at block center
 - **Propagation**: Broadcasts color to all pixels in block
@@ -217,6 +219,13 @@ The summary helps you quickly understand if your simulated policy accurately mod
 - **Propagation**: Broadcasts sampled color to entire block
 - **Samples per Block**: 1 (at nearest pixel to gradient-weighted centroid)
 - **Use Case**: Intelligent sampling that adapts to local image structure; samples near edges/details within each block without sub-pixel interpolation
+
+### Minimum Gradient (4x4_minimum_gradient)
+- **Description**: Safest and most robust gradient-based VRS policy
+- **Sampling**: Uses GPU-style ddx/ddy derivatives to calculate gradient magnitude, selects pixel with minimum gradient (flattest/most stable color)
+- **Propagation**: Broadcasts sampled color to entire block
+- **Samples per Block**: 1 (at minimum gradient location)
+- **Use Case**: Best for maintaining visual quality by avoiding sampling from sharp edges or highlights; minimizes risk of smearing artifacts
 
 ## Limitations
 

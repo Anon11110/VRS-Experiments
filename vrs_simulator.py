@@ -40,7 +40,7 @@ def main():
     parser.add_argument("-p", "--policy", required=True, type=str,
                         choices=["2x2_centroid", "4x4_centroid", "2x2_center_bilinear",
                                  "4x4_center_bilinear", "4x4_corner_cycle", "4x4_corner_adaptive",
-                                 "4x4_gradient_centroid", "2x2_cas", "4x4_cas"],
+                                 "4x4_gradient_centroid"],
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
@@ -70,23 +70,19 @@ def main():
 
     # Apply the selected VRS policy
     if args.policy == "2x2_centroid":
-        vrs_image, sample_count = policies.standard_centroid(native_image, shading_rate=2)
+        vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=2)
     elif args.policy == "4x4_centroid":
-        vrs_image, sample_count = policies.standard_centroid(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=4)
     elif args.policy == "2x2_center_bilinear":
-        vrs_image, sample_count = policies.center_sample_bilinear(native_image, shading_rate=2)
+        vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=2)
     elif args.policy == "4x4_center_bilinear":
-        vrs_image, sample_count = policies.center_sample_bilinear(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=4)
     elif args.policy == "4x4_corner_cycle":
         vrs_image, sample_count = policies.corner_cycling(native_image, shading_rate=4, phase=0)
     elif args.policy == "4x4_corner_adaptive":
         vrs_image, sample_count = policies.content_adaptive_corner(native_image, shading_rate=4)
     elif args.policy == "4x4_gradient_centroid":
         vrs_image, sample_count = policies.gradient_centroid(native_image, shading_rate=4)
-    elif args.policy == "2x2_cas":
-        vrs_image, sample_count = policies.contrast_adaptive_shading(native_image, shading_rate=2, threshold=100)
-    elif args.policy == "4x4_cas":
-        vrs_image, sample_count = policies.contrast_adaptive_shading(native_image, shading_rate=4, threshold=100)
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1

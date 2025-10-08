@@ -55,10 +55,6 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
 7. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
 
-**Dynamic Rate Policies:**
-8. **`2x2_cas`** - Contrast-Adaptive Shading (2x2 blocks)
-9. **`4x4_cas`** - Contrast-Adaptive Shading (4x4 blocks)
-
 ### Typical Workflow
 
 When you have hardware VRS output from your GPU:
@@ -104,7 +100,6 @@ python vrs_simulator.py -i native.png -o sim_4x4_center_bilinear.png -p 4x4_cent
 python vrs_simulator.py -i native.png -o sim_corner_cycle.png -p 4x4_corner_cycle -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_corner_adaptive.png -p 4x4_corner_adaptive -hw hardware.png
 python vrs_simulator.py -i native.png -o sim_gradient_centroid.png -p 4x4_gradient_centroid -hw hardware.png
-python vrs_simulator.py -i native.png -o sim_cas.png -p 4x4_cas -hw hardware.png
 ```
 
 ### Generate Test Image
@@ -188,14 +183,14 @@ The summary helps you quickly understand if your simulated policy accurately mod
 
 ## Policy Descriptions
 
-### Standard Centroid (2x2_centroid, 4x4_centroid)
+### Nearest-Neighbor Filtering Centroid (2x2_centroid, 4x4_centroid)
 - **Description**: Basic VRS with nearest-neighbor filtering
 - **Sampling**: Single sample from integer pixel at block center
 - **Propagation**: Broadcasts color to all pixels in block
 - **Samples per Block**: 1 (at integer coordinate)
 - **Use Case**: Simple VRS simulation; fastest but may produce blocky artifacts
 
-### Center Sample Bilinear (2x2_center_bilinear, 4x4_center_bilinear) **[RECOMMENDED]**
+### Bilinear Filtering Centroid (2x2_center_bilinear, 4x4_center_bilinear) **[RECOMMENDED]**
 - **Description**: Direct simulation of one shader invocation at block center with sub-pixel accuracy
 - **Sampling**: Single sample at sub-pixel center coordinate using bilinear interpolation
 - **Propagation**: Broadcasts sampled color to entire block
@@ -218,17 +213,10 @@ The summary helps you quickly understand if your simulated policy accurately mod
 
 ### Gradient Centroid (4x4_gradient_centroid)
 - **Description**: Advanced policy that samples at gradient-weighted centroid of each block
-- **Sampling**: Calculates gradient magnitude map, computes centroid weighted by gradient, samples at sub-pixel location using bilinear interpolation
+- **Sampling**: Calculates gradient magnitude map, computes centroid weighted by gradient, rounds to nearest integer pixel (nearest-neighbor)
 - **Propagation**: Broadcasts sampled color to entire block
-- **Samples per Block**: 1 (at gradient-weighted centroid)
-- **Use Case**: Intelligent sampling that adapts to local image structure; samples near edges/details within each block
-
-### Contrast-Adaptive Shading (2x2_cas, 4x4_cas)
-- **Description**: Dynamic rate policy that preserves detail in high-contrast areas
-- **Sampling**: Varies per block - coarse rate (1 sample) for low-variance areas, native rate (N×M samples) for high-variance
-- **Propagation**: Single sample broadcast for coarse blocks, native resolution for detailed areas
-- **Samples per Block**: Variable (1 for smooth areas, up to 16 for 4x4 detailed areas)
-- **Use Case**: Performance optimization while preserving visual quality in important regions
+- **Samples per Block**: 1 (at nearest pixel to gradient-weighted centroid)
+- **Use Case**: Intelligent sampling that adapts to local image structure; samples near edges/details within each block without sub-pixel interpolation
 
 ## Limitations
 

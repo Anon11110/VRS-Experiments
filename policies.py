@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 
 
-def standard_centroid(native_image, shading_rate):
+def nearest_neighbor_filtering_centroid(native_image, shading_rate):
     """
-    Policy 1: Standard Centroid (Nearest-Neighbor)
+    Policy 1: Nearest-Neighbor Filtering Centroid
     Simulates hardware VRS with nearest-neighbor filtering by sampling the center pixel.
     One shader invocation per block at the integer center coordinate.
 
@@ -183,9 +183,9 @@ def sample_bilinear(image, x, y):
     return (1 - v) * top + v * bottom
 
 
-def center_sample_bilinear(native_image, shading_rate=4):
+def bilinear_filtering_centroid(native_image, shading_rate=4):
     """
-    Policy: Center Sample with Bilinear Interpolation
+    Policy: Bilinear Filtering Centroid
     Simulates VRS by invoking a single shader at the center of each block,
     using bilinear interpolation for sub-pixel accuracy.
 
@@ -226,11 +226,12 @@ def center_sample_bilinear(native_image, shading_rate=4):
 def gradient_centroid(native_image, shading_rate=4):
     """
     Policy: Dynamic Gradient Centroid VRS
-    Samples at the sub-pixel centroid of the gradient magnitude within each block.
+    Samples at the nearest integer pixel to the gradient-weighted centroid within each block.
 
-    This policy calculates a gradient map, then for each block computes the centroid
-    weighted by gradient magnitude. The sample is taken at this sub-pixel location
-    using bilinear interpolation.
+    Gradient is computed using forward-difference approximations of GPU implicit
+    derivatives:
+        ddx(f)(x,y) ≈ f(x+1,y) - f(x,y)
+        ddy(f)(x,y) ≈ f(x,y+1) - f(x,y)
 
     Args:
         native_image: Input image in BGR format
@@ -240,14 +241,25 @@ def gradient_centroid(native_image, shading_rate=4):
         Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
-    vrs_image = np.zeros_like(native_image, dtype=np.float64)
+    vrs_image = native_image.copy()
     sample_count = 0
 
-    # Stage 1: Calculate Gradient Map
-    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY)
-    grad_x = cv2.Sobel(gray_image, cv2.CV_64F, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(gray_image, cv2.CV_64F, 0, 1, ksize=3)
-    magnitude_map = cv2.magnitude(grad_x, grad_y)
+    # Stage 1: Calculate Gradient Map using ddx/ddy (forward differences)
+    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+    # ddx: f(x+1,y) - f(x,y)
+    ddx = np.zeros_like(gray_image, dtype=np.float32)
+    ddx[:, :-1] = gray_image[:, 1:] - gray_image[:, :-1]
+    # Last column has no +x neighbor; set derivative to 0 (similar to helper-lane/edge behavior)
+    ddx[:, -1] = 0.0
+
+    # ddy: f(x,y+1) - f(x,y)
+    ddy = np.zeros_like(gray_image, dtype=np.float32)
+    ddy[:-1, :] = gray_image[1:, :] - gray_image[:-1, :]
+    # Last row has no +y neighbor; set derivative to 0
+    ddy[-1, :] = 0.0
+
+    magnitude_map = np.hypot(ddx, ddy)
 
     # Create coordinate grids for a block to aid in centroid calculation
     local_y, local_x = np.mgrid[0:shading_rate, 0:shading_rate]
@@ -260,7 +272,7 @@ def gradient_centroid(native_image, shading_rate=4):
             block_width = min(shading_rate, width - x)
             mag_block = magnitude_map[y:y+block_height, x:x+block_width]
 
-            # Stage 2: Calculate Centroid
+            # Stage 2: Calculate Centroid (gradient-magnitude-weighted)
             total_magnitude = np.sum(mag_block)
             if total_magnitude > 1e-6:  # Avoid division by zero
                 offset_y = np.sum(local_y[:block_height, :block_width] * mag_block) / total_magnitude
@@ -269,59 +281,13 @@ def gradient_centroid(native_image, shading_rate=4):
                 offset_y = (block_height - 1) / 2.0
                 offset_x = (block_width - 1) / 2.0
 
-            sample_y = y + offset_y
-            sample_x = x + offset_x
+            # Round to nearest integer pixel (nearest-neighbor)
+            sample_y = min(int(round(y + offset_y)), height - 1)
+            sample_x = min(int(round(x + offset_x)), width - 1)
 
             # Stage 3: Sample and Replicate
-            sample_color = sample_bilinear(native_image, sample_x, sample_y)
-            vrs_image[y:y+block_height, x:x+block_width] = sample_color
-
-    return np.clip(vrs_image, 0, 255).astype(np.uint8), sample_count
-
-
-def contrast_adaptive_shading(native_image, shading_rate=2, threshold=100):
-    """
-    Policy: Contrast-Adaptive Shading (CAS)
-    Dynamically reduces pixel shading rate in screen-space regions of low visual complexity.
-    Applies coarse shading only to blocks with low luminance variance, preserving full resolution
-    in high-detail areas.
-
-    Args:
-        native_image: Input image in BGR format
-        shading_rate: Coarse shading rate for low-variance blocks (default: 2)
-        threshold: Luminance variance threshold (lower = more conservative, higher = more aggressive)
-
-    Returns:
-        Tuple of (simulated VRS image, sample count)
-    """
-    height, width, channels = native_image.shape
-    vrs_image = native_image.copy()
-    sample_count = 0
-
-    # Convert to grayscale for luminance variance calculation
-    gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY)
-
-    # Process image in blocks
-    for y in range(0, height, shading_rate):
-        for x in range(0, width, shading_rate):
-            # Calculate block boundaries
-            block_height = min(shading_rate, height - y)
-            block_width = min(shading_rate, width - x)
-
-            # Extract grayscale block and calculate luminance variance
-            block_gray = gray_image[y:y+block_height, x:x+block_width]
-            variance = np.var(block_gray)
-
-            # Apply coarse shading for low-variance blocks, native for high-variance
-            if variance < threshold:
-                sample_count += 1  # Coarse shaded block is 1 shader invocation
-                # Low variance: apply coarse shading (average color)
-                block_native = native_image[y:y+block_height, x:x+block_width]
-                avg_color = np.mean(block_native, axis=(0, 1)).astype(np.uint8)
-                vrs_image[y:y+block_height, x:x+block_width] = avg_color
-            else:
-                # High variance: native resolution (one shader invocation per pixel)
-                sample_count += block_height * block_width
+            sampled_color = native_image[sample_y, sample_x]
+            vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
     return vrs_image, sample_count
 

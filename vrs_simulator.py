@@ -8,21 +8,19 @@ from skimage.metrics import mean_squared_error, peak_signal_noise_ratio, structu
 
 def calculate_metrics(original_image, simulated_image):
     """Calculate image quality metrics between original and simulated images."""
-    # Convert images to float for accurate metrics calculation
     orig_float = original_image.astype(np.float64)
     sim_float = simulated_image.astype(np.float64)
 
     # Calculate MSE
     mse = mean_squared_error(orig_float, sim_float)
 
-    # Calculate PSNR (handle edge case where MSE is 0)
+    # Calculate PSNR
     if mse == 0:
         psnr = float('inf')
     else:
         psnr = peak_signal_noise_ratio(original_image, simulated_image, data_range=255)
 
     # Calculate SSIM
-    # Convert BGR to RGB for SSIM calculation
     orig_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
     sim_rgb = cv2.cvtColor(simulated_image, cv2.COLOR_BGR2RGB)
     ssim = structural_similarity(orig_rgb, sim_rgb, channel_axis=-1, data_range=255)
@@ -31,7 +29,6 @@ def calculate_metrics(original_image, simulated_image):
 
 
 def main():
-    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="VRS Offline Policy Verifier (VOPV)")
     parser.add_argument("-i", "--input", required=True, type=str,
                         help="Path to the native resolution input image")
@@ -45,31 +42,67 @@ def main():
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
+    parser.add_argument("-pf", "--pre-final", type=str,
+                        help="Path to pre-final pass image for delta-based VRS (optional)")
 
     args = parser.parse_args()
 
-    # Load the native resolution image
     native_image = cv2.imread(args.input)
     if native_image is None:
         print(f"Error: Could not load image from {args.input}")
         return 1
 
-    # Load hardware VRS image if provided
+    # Delta mode: compute the final pass contribution
+    if args.pre_final:
+        pre_final_image = cv2.imread(args.pre_final)
+        if pre_final_image is None:
+            print(f"Error: Could not load pre-final pass image from {args.pre_final}")
+            return 1
+        if pre_final_image.shape != native_image.shape:
+            print(f"Error: Pre-final pass image dimensions {pre_final_image.shape} don't match native image {native_image.shape}")
+            return 1
+
+        print(f"Delta mode: Computing final pass contribution (native - pre-final)...")
+        delta = native_image.astype(np.float32) - pre_final_image.astype(np.float32)
+        print(f"Delta range: [{np.min(delta):.2f}, {np.max(delta):.2f}], mean: {np.mean(delta):.2f}")
+
+        # Normalize delta to [0, 255] for VRS processing
+        delta_min, delta_max = np.min(delta), np.max(delta)
+        if delta_max - delta_min > 1e-6:
+            native_image = ((delta - delta_min) / (delta_max - delta_min) * 255.0).astype(np.uint8)
+        else:
+            native_image = np.zeros_like(native_image, dtype=np.uint8)
+        print(f"Processing normalized delta with VRS policy...")
+    else:
+        pre_final_image = None
+        delta_min, delta_max = None, None
+
     hardware_image = None
+    hardware_image_original = None
     if args.hardware:
-        hardware_image = cv2.imread(args.hardware)
-        if hardware_image is None:
+        hardware_image_original = cv2.imread(args.hardware)
+        if hardware_image_original is None:
             print(f"Error: Could not load hardware VRS image from {args.hardware}")
             return 1
 
-        # Check dimensions match
-        if hardware_image.shape != native_image.shape:
-            print(f"Error: Hardware VRS image dimensions {hardware_image.shape} don't match native image {native_image.shape}")
+        if hardware_image_original.shape != native_image.shape:
+            print(f"Error: Hardware VRS image dimensions {hardware_image_original.shape} don't match native image {native_image.shape}")
             return 1
+
+        # If in delta mode, also extract the delta from hardware image
+        if args.pre_final:
+            print(f"Delta mode: Computing hardware VRS delta (hardware - pre-final)...")
+            hw_delta = hardware_image_original.astype(np.float32) - pre_final_image.astype(np.float32)
+            # Normalize using the same range as the native delta for fair comparison
+            if delta_max - delta_min > 1e-6:
+                hardware_image = ((hw_delta - delta_min) / (delta_max - delta_min) * 255.0).astype(np.uint8)
+            else:
+                hardware_image = np.zeros_like(hardware_image_original, dtype=np.uint8)
+        else:
+            hardware_image = hardware_image_original
 
     print(f"Running policy: {args.policy}...")
 
-    # Apply the selected VRS policy
     if args.policy == "2x2_centroid_nearest_neighbor":
         vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=2)
     elif args.policy == "4x4_centroid_nearest_neighbor":
@@ -85,9 +118,9 @@ def main():
     elif args.policy == "4x4_gradient_centroid":
         vrs_image, sample_count = policies.gradient_centroid(native_image, shading_rate=4)
     elif args.policy == "4x4_minimum_gradient":
-        vrs_image, sample_count = policies.minimum_gradient_ddx_ddy(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=4)
     elif args.policy == "4x4_maximum_gradient":
-        vrs_image, sample_count = policies.maximum_gradient_ddx_ddy(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=4)
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1
@@ -98,7 +131,6 @@ def main():
     native_sample_count = total_pixels
     shading_reduction = ((native_sample_count - sample_count) / native_sample_count) * 100
 
-    # Calculate and display metrics
     print("\n" + "="*60)
     print("PERFORMANCE METRICS")
     print("="*60)
@@ -137,14 +169,13 @@ def main():
         print(f"\nSimulated VRS ({args.policy}) vs Hardware VRS:")
         print("-" * 60)
         metrics_sim_vs_hw = calculate_metrics(hardware_image, vrs_image)
-        print(f"  MSE:  {metrics_sim_vs_hw['MSE']:8.2f}  (Lower is better - shows similarity)")
+        print(f"  MSE:  {metrics_sim_vs_hw['MSE']:8.2f}  (Lower is better)")
         if metrics_sim_vs_hw['PSNR'] == float('inf'):
             print(f"  PSNR:      ∞ dB  (Perfect match)")
         else:
             print(f"  PSNR: {metrics_sim_vs_hw['PSNR']:8.2f} dB  (Higher is better)")
         print(f"  SSIM: {metrics_sim_vs_hw['SSIM']:8.4f}  (Higher is better, 1.0 is perfect)")
 
-        # Summary
         print("\n" + "="*60)
         print("SUMMARY")
         print("="*60)
@@ -160,7 +191,28 @@ def main():
 
     print("="*60 + "\n")
 
-    # Save the output image
+    # If delta mode, denormalize and reconstruct final images
+    if args.pre_final:
+        print(f"\nDenormalizing VRS delta and reconstructing final image...")
+        vrs_delta = vrs_image.astype(np.float32)
+        if delta_max - delta_min > 1e-6:
+            vrs_delta = (vrs_delta / 255.0) * (delta_max - delta_min) + delta_min
+        else:
+            vrs_delta = np.zeros_like(vrs_delta)
+
+        # Reconstruct: pre_final + vrs_delta
+        vrs_image = pre_final_image.astype(np.float32) + vrs_delta
+        vrs_image = np.clip(vrs_image, 0, 255).astype(np.uint8)
+
+        if hardware_image is not None:
+            hw_delta = hardware_image.astype(np.float32)
+            if delta_max - delta_min > 1e-6:
+                hw_delta = (hw_delta / 255.0) * (delta_max - delta_min) + delta_min
+            else:
+                hw_delta = np.zeros_like(hw_delta)
+            hardware_image = pre_final_image.astype(np.float32) + hw_delta
+            hardware_image = np.clip(hardware_image, 0, 255).astype(np.uint8)
+
     success = cv2.imwrite(args.output, vrs_image)
     if success:
         print(f"Success! Simulated VRS image saved to {args.output}")

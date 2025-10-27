@@ -6,21 +6,19 @@ from skimage.metrics import mean_squared_error, peak_signal_noise_ratio, structu
 
 def calculate_metrics(image1, image2):
     """Calculate image quality metrics between two images."""
-    # Convert images to float for accurate metrics calculation
     img1_float = image1.astype(np.float64)
     img2_float = image2.astype(np.float64)
 
     # Calculate MSE
     mse = mean_squared_error(img1_float, img2_float)
 
-    # Calculate PSNR (handle edge case where MSE is 0)
+    # Calculate PSNR
     if mse == 0:
         psnr = float('inf')
     else:
         psnr = peak_signal_noise_ratio(image1, image2, data_range=255)
 
     # Calculate SSIM
-    # Convert BGR to RGB for SSIM calculation
     img1_rgb = cv2.cvtColor(image1, cv2.COLOR_BGR2RGB)
     img2_rgb = cv2.cvtColor(image2, cv2.COLOR_BGR2RGB)
     ssim = structural_similarity(img1_rgb, img2_rgb, channel_axis=-1, data_range=255)
@@ -29,7 +27,6 @@ def calculate_metrics(image1, image2):
 
 
 def main():
-    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Compare two images using quality metrics")
     parser.add_argument("-i1", "--image1", required=True, type=str,
                         help="Path to the first image")
@@ -38,19 +35,16 @@ def main():
 
     args = parser.parse_args()
 
-    # Load the first image
     image1 = cv2.imread(args.image1)
     if image1 is None:
         print(f"Error: Could not load image from {args.image1}")
         return 1
 
-    # Load the second image
     image2 = cv2.imread(args.image2)
     if image2 is None:
         print(f"Error: Could not load image from {args.image2}")
         return 1
 
-    # Check dimensions match
     if image1.shape != image2.shape:
         print(f"Error: Image dimensions don't match")
         print(f"  Image 1: {image1.shape}")
@@ -75,7 +69,6 @@ def main():
         print(f"PSNR: {metrics['PSNR']:8.2f} dB  (Higher is better)")
     print(f"SSIM: {metrics['SSIM']:8.4f}  (Higher is better, 1.0 = perfect)")
 
-    # Interpretation
     print("\n" + "="*60)
     print("INTERPRETATION")
     print("="*60)

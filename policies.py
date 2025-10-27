@@ -4,7 +4,7 @@ import numpy as np
 
 def nearest_neighbor_filtering_centroid(native_image, shading_rate):
     """
-    Policy 1: Nearest-Neighbor Filtering Centroid
+    Policy: Nearest-Neighbor Filtering Centroid
     Simulates hardware VRS with nearest-neighbor filtering by sampling the center pixel.
     One shader invocation per block at the integer center coordinate.
 
@@ -19,10 +19,9 @@ def nearest_neighbor_filtering_centroid(native_image, shading_rate):
     vrs_image = native_image.copy()
     sample_count = 0
 
-    # Process image in blocks
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
+            sample_count += 1
 
             # Calculate block boundaries
             block_height = min(shading_rate, height - y)
@@ -41,8 +40,8 @@ def nearest_neighbor_filtering_centroid(native_image, shading_rate):
 
 def corner_cycling(native_image, shading_rate=4, phase=0):
     """
-    Policy 2: Corner Cycling
-    Pick exactly one corner per block using a tiled 2×2 cycling pattern,
+    Policy: Corner Cycling
+    Pick exactly one corner per block using a tiled cycling pattern,
     then broadcast the sampled color to the whole block.
 
     Corner indices: 0=TL, 1=TR, 2=BL, 3=BR
@@ -103,7 +102,6 @@ def content_adaptive_corner(native_image, shading_rate=4):
     vrs_image = native_image.copy()
     sample_count = 0
 
-    # Use the image directly as a float for math
     img = native_image.astype(np.float32)
 
     def grad_mag_color(y, x):
@@ -189,9 +187,6 @@ def bilinear_filtering_centroid(native_image, shading_rate=4):
     Simulates VRS by invoking a single shader at the center of each block,
     using bilinear interpolation for sub-pixel accuracy.
 
-    This is a more direct simulation of "one shader invocation per block" compared
-    to averaging, which simulates texture filtering hardware.
-
     Args:
         native_image: Input image in BGR format
         shading_rate: Block size (default: 4 for 4x4)
@@ -205,7 +200,7 @@ def bilinear_filtering_centroid(native_image, shading_rate=4):
 
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
+            sample_count += 1
 
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
@@ -244,7 +239,7 @@ def gradient_centroid(native_image, shading_rate=4):
     vrs_image = native_image.copy()
     sample_count = 0
 
-    # Stage 1: Calculate Gradient Map using ddx/ddy (forward differences)
+    # Calculate Gradient Map using ddx/ddy (forward differences)
     gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
     # ddx: f(x+1,y) - f(x,y)
@@ -266,13 +261,13 @@ def gradient_centroid(native_image, shading_rate=4):
 
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
+            sample_count += 1
 
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
             mag_block = magnitude_map[y:y+block_height, x:x+block_width]
 
-            # Stage 2: Calculate Centroid (gradient-magnitude-weighted)
+            # Calculate Centroid (gradient-magnitude-weighted)
             total_magnitude = np.sum(mag_block)
             if total_magnitude > 1e-6:  # Avoid division by zero
                 offset_y = np.sum(local_y[:block_height, :block_width] * mag_block) / total_magnitude
@@ -285,7 +280,7 @@ def gradient_centroid(native_image, shading_rate=4):
             sample_y = min(int(round(y + offset_y)), height - 1)
             sample_x = min(int(round(x + offset_x)), width - 1)
 
-            # Stage 3: Sample and Replicate
+            # Sample and Replicate
             sampled_color = native_image[sample_y, sample_x]
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
@@ -294,16 +289,10 @@ def gradient_centroid(native_image, shading_rate=4):
 
 def minimum_gradient(native_image, shading_rate=4):
     """
-    Policy: Minimum Gradient (using ddx/ddy)
-    Selects the pixel with the minimum gradient magnitude within each block,
-    using GPU-style ddx/ddy gradient calculation.
+    Policy: Minimum Gradient
+    Selects the pixel with the minimum gradient magnitude within each block.
 
-    This is the safest and most robust approach for VRS. By choosing the "flattest"
-    or most stable color in the block, it minimizes the risk of sampling from sharp
-    edges or highlights and smearing artifacts across the block.
-
-    Uses ddx (horizontal gradient) and ddy (vertical gradient) to mimic GPU shader
-    derivative functions for gradient calculation.
+    Uses ddx and ddy to mimic GPU shader derivative functions for gradient calculation.
 
     Args:
         native_image: Input image in BGR format
@@ -316,11 +305,9 @@ def minimum_gradient(native_image, shading_rate=4):
     vrs_image = native_image.copy()
     sample_count = 0
 
-    # Convert to grayscale for gradient calculation
     gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
-    # Calculate ddx (horizontal gradient) and ddy (vertical gradient)
-    # Using simple finite differences to mimic GPU ddx/ddy
+    # Calculate ddx and ddy
     ddx = np.zeros_like(gray_image)
     ddy = np.zeros_like(gray_image)
 
@@ -335,10 +322,9 @@ def minimum_gradient(native_image, shading_rate=4):
     # Calculate gradient magnitude: sqrt(ddx^2 + ddy^2)
     magnitude_map = np.sqrt(ddx**2 + ddy**2)
 
-    # Process image in blocks
     for y in range(0, height, shading_rate):
         for x in range(0, width, shading_rate):
-            sample_count += 1  # One shader invocation per block
+            sample_count += 1
 
             # Calculate block boundaries
             block_height = min(shading_rate, height - y)
@@ -361,18 +347,10 @@ def minimum_gradient(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
-def maximum_gradient_ddx_ddy(native_image, shading_rate=4):
+def minimum_gradient(native_image, shading_rate=4):
     """
-    Policy: Maximum Gradient (using ddx/ddy)
-    Selects the pixel with the maximum gradient magnitude within each block,
-    using GPU-style ddx/ddy gradient calculation.
-
-    This is a more aggressive approach that samples at edges/details. While it can
-    preserve edge information, it's riskier as it may pick outliers (e.g., bright
-    highlights) and smear them across the block, creating visible artifacts.
-
-    Uses ddx (horizontal gradient) and ddy (vertical gradient) to mimic GPU shader
-    derivative functions for gradient calculation.
+    Policy: Maximum Gradient
+    Selects the pixel with the maximum gradient magnitude within each block.
 
     Args:
         native_image: Input image in BGR format
@@ -385,11 +363,9 @@ def maximum_gradient_ddx_ddy(native_image, shading_rate=4):
     vrs_image = native_image.copy()
     sample_count = 0
 
-    # Convert to grayscale for gradient calculation
     gray_image = cv2.cvtColor(native_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
-    # Calculate ddx (horizontal gradient) and ddy (vertical gradient)
-    # Using simple finite differences to mimic GPU ddx/ddy
+    # Calculate ddx and ddy
     ddx = np.zeros_like(gray_image)
     ddy = np.zeros_like(gray_image)
 
@@ -428,5 +404,3 @@ def maximum_gradient_ddx_ddy(native_image, shading_rate=4):
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
 
     return vrs_image, sample_count
-
-

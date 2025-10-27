@@ -38,7 +38,7 @@ def nearest_neighbor_filtering_centroid(native_image, shading_rate):
     return vrs_image, sample_count
 
 
-def corner_cycling(native_image, shading_rate=4, phase=0):
+def corner_cycling(native_image, shading_rate, phase=0):
     """
     Policy: Corner Cycling
     Pick exactly one corner per block using a tiled cycling pattern,
@@ -92,7 +92,7 @@ def corner_cycling(native_image, shading_rate=4, phase=0):
     return vrs_image, sample_count
 
 
-def content_adaptive_corner(native_image, shading_rate=4):
+def content_adaptive_corner(native_image, shading_rate):
     """
     Policy: Content-Adaptive Corner
     For each block, evaluate the color gradient (ddx/ddy) at each corner,
@@ -181,7 +181,7 @@ def sample_bilinear(image, x, y):
     return (1 - v) * top + v * bottom
 
 
-def bilinear_filtering_centroid(native_image, shading_rate=4):
+def bilinear_filtering_centroid(native_image, shading_rate):
     """
     Policy: Bilinear Filtering Centroid
     Simulates VRS by invoking a single shader at the center of each block,
@@ -218,7 +218,7 @@ def bilinear_filtering_centroid(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
-def gradient_centroid(native_image, shading_rate=4):
+def gradient_centroid(native_image, shading_rate):
     """
     Policy: Dynamic Gradient Centroid VRS
     Samples at the nearest integer pixel to the gradient-weighted centroid within each block.
@@ -287,7 +287,7 @@ def gradient_centroid(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
-def minimum_gradient(native_image, shading_rate=4):
+def minimum_gradient(native_image, shading_rate):
     """
     Policy: Minimum Gradient
     Selects the pixel with the minimum gradient magnitude within each block.
@@ -296,7 +296,7 @@ def minimum_gradient(native_image, shading_rate=4):
 
     Args:
         native_image: Input image in BGR format
-        shading_rate: Block size (default: 4 for 4x4)
+        shading_rate: Block size (2 for 2x2, 4 for 4x4)
 
     Returns:
         Tuple of (simulated VRS image, sample count)
@@ -347,14 +347,14 @@ def minimum_gradient(native_image, shading_rate=4):
     return vrs_image, sample_count
 
 
-def minimum_gradient(native_image, shading_rate=4):
+def maximum_gradient(native_image, shading_rate):
     """
     Policy: Maximum Gradient
     Selects the pixel with the maximum gradient magnitude within each block.
 
     Args:
         native_image: Input image in BGR format
-        shading_rate: Block size (default: 4 for 4x4)
+        shading_rate: Block size (2 for 2x2, 4 for 4x4)
 
     Returns:
         Tuple of (simulated VRS image, sample count)

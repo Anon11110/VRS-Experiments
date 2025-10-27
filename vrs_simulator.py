@@ -36,14 +36,19 @@ def main():
                         help="Path for the output simulated image")
     parser.add_argument("-p", "--policy", required=True, type=str,
                         choices=["2x2_centroid_nearest_neighbor", "4x4_centroid_nearest_neighbor",
-                                 "2x2_center_bilinear", "4x4_center_bilinear", "4x4_corner_cycle",
-                                 "4x4_corner_adaptive", "4x4_gradient_centroid",
-                                 "4x4_minimum_gradient", "4x4_maximum_gradient"],
+                                 "2x2_center_bilinear", "4x4_center_bilinear",
+                                 "2x2_corner_cycle", "4x4_corner_cycle",
+                                 "2x2_corner_adaptive", "4x4_corner_adaptive",
+                                 "2x2_gradient_centroid", "4x4_gradient_centroid",
+                                 "2x2_minimum_gradient", "4x4_minimum_gradient",
+                                 "2x2_maximum_gradient", "4x4_maximum_gradient"],
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
     parser.add_argument("-pf", "--pre-final", type=str,
                         help="Path to pre-final pass image for delta-based VRS (optional)")
+    parser.add_argument("--save-delta", type=str,
+                        help="Path to save the delta/difference image between native and VRS result (optional)")
 
     args = parser.parse_args()
 
@@ -111,16 +116,26 @@ def main():
         vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=2)
     elif args.policy == "4x4_center_bilinear":
         vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=4)
+    elif args.policy == "2x2_corner_cycle":
+        vrs_image, sample_count = policies.corner_cycling(native_image, shading_rate=2, phase=0)
     elif args.policy == "4x4_corner_cycle":
         vrs_image, sample_count = policies.corner_cycling(native_image, shading_rate=4, phase=0)
+    elif args.policy == "2x2_corner_adaptive":
+        vrs_image, sample_count = policies.content_adaptive_corner(native_image, shading_rate=2)
     elif args.policy == "4x4_corner_adaptive":
         vrs_image, sample_count = policies.content_adaptive_corner(native_image, shading_rate=4)
+    elif args.policy == "2x2_gradient_centroid":
+        vrs_image, sample_count = policies.gradient_centroid(native_image, shading_rate=2)
     elif args.policy == "4x4_gradient_centroid":
         vrs_image, sample_count = policies.gradient_centroid(native_image, shading_rate=4)
+    elif args.policy == "2x2_minimum_gradient":
+        vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=2)
     elif args.policy == "4x4_minimum_gradient":
         vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=4)
+    elif args.policy == "2x2_maximum_gradient":
+        vrs_image, sample_count = policies.maximum_gradient(native_image, shading_rate=2)
     elif args.policy == "4x4_maximum_gradient":
-        vrs_image, sample_count = policies.minimum_gradient(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.maximum_gradient(native_image, shading_rate=4)
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1
@@ -219,6 +234,51 @@ def main():
     else:
         print(f"Error: Could not save image to {args.output}")
         return 1
+
+    # Save delta image if requested
+    if args.save_delta:
+        if args.pre_final:
+            original_native_image = cv2.imread(args.input)
+        else:
+            original_native_image = native_image
+
+        diff = np.abs(original_native_image.astype(np.float32) - vrs_image.astype(np.float32))
+
+        max_diff = np.max(diff)
+        mean_diff = np.mean(diff)
+
+        print(f"\nDelta Image Statistics:")
+        print(f"  Max difference: {max_diff:.2f}")
+        print(f"  Mean difference: {mean_diff:.2f}")
+
+        # Option 1: Amplified visualization (scales differences for better visibility)
+        # Multiply by a factor to make subtle differences more visible
+        amplification_factor = 5.0
+        diff_amplified = np.clip(diff * amplification_factor, 0, 255).astype(np.uint8)
+
+        # Option 2: Heat map visualization
+        # Convert to grayscale showing magnitude of differences
+        diff_gray = np.mean(diff, axis=2)  # Average across color channels
+        diff_normalized = (diff_gray / max_diff * 255).astype(np.uint8) if max_diff > 0 else np.zeros_like(diff_gray, dtype=np.uint8)
+
+        # Apply a colormap for better visualization (red = high difference, blue = low)
+        diff_heatmap = cv2.applyColorMap(diff_normalized, cv2.COLORMAP_JET)
+
+        delta_success = cv2.imwrite(args.save_delta, diff_amplified)
+
+        heatmap_path = args.save_delta.rsplit('.', 1)
+        if len(heatmap_path) == 2:
+            heatmap_path = f"{heatmap_path[0]}_heatmap.{heatmap_path[1]}"
+        else:
+            heatmap_path = f"{args.save_delta}_heatmap"
+        heatmap_success = cv2.imwrite(heatmap_path, diff_heatmap)
+
+        if delta_success:
+            print(f"Delta image saved to {args.save_delta} (amplified {amplification_factor}x)")
+            if heatmap_success:
+                print(f"Delta heatmap saved to {heatmap_path}")
+        else:
+            print(f"Error: Could not save delta image to {args.save_delta}")
 
     return 0
 

@@ -17,18 +17,19 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 - `-p, --policy`: VRS policy to apply (required)
 - `-hw, --hardware`: Path to hardware VRS image for comparison (optional)
 - `-pf, --pre-final`: Path to pre-final pass image for delta-based VRS evaluation (optional)
+- `--save-delta`: Path to save the delta/difference image between native and VRS result (optional)
 
 ### Available Policies
 
-1. **`2x2_centroid_nearest_neighbor`** - 2x2 centroid sampling (nearest-neighbor)
-2. **`4x4_centroid_nearest_neighbor`** - 4x4 centroid sampling (nearest-neighbor)
-3. **`2x2_center_bilinear`** - 2x2 center-point sampling with bilinear interpolation
-4. **`4x4_center_bilinear`** - 4x4 center-point sampling with bilinear interpolation
-5. **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
-6. **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
-7. **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
-8. **`4x4_minimum_gradient`** - Minimum gradient magnitude sampling (safest/most robust)
-9. **`4x4_maximum_gradient`** - Maximum gradient magnitude sampling (edge-preserving but risky)
+All policies support both 2x2 and 4x4 block sizes:
+
+1. **`2x2_centroid_nearest_neighbor`** / **`4x4_centroid_nearest_neighbor`** - Centroid sampling (nearest-neighbor)
+2. **`2x2_center_bilinear`** / **`4x4_center_bilinear`** - Center-point sampling with bilinear interpolation
+3. **`2x2_corner_cycle`** / **`4x4_corner_cycle`** - Corner cycling with tiled 2×2 pattern
+4. **`2x2_corner_adaptive`** / **`4x4_corner_adaptive`** - Content-adaptive corner selection (quality-focused)
+5. **`2x2_gradient_centroid`** / **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
+6. **`2x2_minimum_gradient`** / **`4x4_minimum_gradient`** - Minimum gradient magnitude sampling (safest/most robust)
+7. **`2x2_maximum_gradient`** / **`4x4_maximum_gradient`** - Maximum gradient magnitude sampling (edge-preserving but risky)
 
 ### Examples
 
@@ -74,6 +75,24 @@ In delta mode, the simulator:
 4. If hardware image is provided, it also processes it the same way for fair comparison
 
 This allows you to isolate and evaluate the quality impact of VRS on just the final render pass.
+
+#### Delta Visualization
+
+To visualize the differences between the native and VRS-processed images, use the `--save-delta` option:
+
+```bash
+# Save delta visualization
+python vrs_simulator.py -i native.png -o output.png -p 4x4_minimum_gradient --save-delta delta.png
+```
+
+This generates two visualization files:
+1. **`delta.png`** - Amplified difference image (5x amplification for better visibility)
+2. **`delta_heatmap.png`** - Color-coded heatmap where:
+   - Blue/green areas: Low difference (good VRS quality)
+   - Yellow/orange areas: Moderate difference
+   - Red areas: High difference (potential quality issues)
+
+The tool also outputs delta statistics including maximum and mean differences to help quantify the impact.
 
 ## Policy Descriptions
 

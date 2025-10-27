@@ -18,6 +18,7 @@ python vrs_simulator.py -i <native_image> -o <output_image> -p <policy> [-hw <ha
 - `-hw, --hardware`: Path to hardware VRS image for comparison (optional)
 - `-pf, --pre-final`: Path to pre-final pass image for delta-based VRS evaluation (optional)
 - `--save-delta`: Path to save the delta/difference image between native and VRS result (optional)
+- `--fp16`: Enable fp16 precision simulation for bilinear policies (matches GPU R16G16B16A16_FLOAT)
 
 ### Available Policies
 

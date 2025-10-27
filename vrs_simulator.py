@@ -49,6 +49,8 @@ def main():
                         help="Path to pre-final pass image for delta-based VRS (optional)")
     parser.add_argument("--save-delta", type=str,
                         help="Path to save the delta/difference image between native and VRS result (optional)")
+    parser.add_argument("--fp16", action="store_true",
+                        help="Enable fp16 precision simulation for bilinear policies (matches R16G16B16A16_FLOAT)")
 
     args = parser.parse_args()
 
@@ -107,15 +109,17 @@ def main():
             hardware_image = hardware_image_original
 
     print(f"Running policy: {args.policy}...")
+    if args.fp16 and "bilinear" in args.policy:
+        print(f"  Using fp16 precision simulation (GPU-accurate R16G16B16A16_FLOAT)")
 
     if args.policy == "2x2_centroid_nearest_neighbor":
         vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=2)
     elif args.policy == "4x4_centroid_nearest_neighbor":
         vrs_image, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=4)
     elif args.policy == "2x2_center_bilinear":
-        vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=2)
+        vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=2, use_fp16=args.fp16)
     elif args.policy == "4x4_center_bilinear":
-        vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=4)
+        vrs_image, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=4, use_fp16=args.fp16)
     elif args.policy == "2x2_corner_cycle":
         vrs_image, sample_count = policies.corner_cycling(native_image, shading_rate=2, phase=0)
     elif args.policy == "4x4_corner_cycle":

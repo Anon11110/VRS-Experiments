@@ -181,21 +181,85 @@ def sample_bilinear(image, x, y):
     return (1 - v) * top + v * bottom
 
 
-def bilinear_filtering_centroid(native_image, shading_rate):
+def sample_lod0_bilinear_uv(image, u, v, use_fp16=False):
     """
-    Policy: Bilinear Filtering Centroid
-    Simulates VRS by invoking a single shader at the center of each block,
-    using bilinear interpolation for sub-pixel accuracy.
+    LOD0 bilinear sampling with normalized UV coordinates.
+    Matches textureLodOffset(..., 0.0, ivec2(...)) with LINEAR filtering and CLAMP_TO_EDGE.
 
     Args:
-        native_image: Input image in BGR format
-        shading_rate: Block size (default: 4 for 4x4)
+        image: Input image (HxWxC numpy array)
+        u: Normalized U coordinate [0, 1]
+        v: Normalized V coordinate [0, 1]
+        use_fp16: If True, simulate fp16 precision path
+
+    Returns:
+        Bilinearly interpolated color
+    """
+    height, width, channels = image.shape
+
+    if use_fp16:
+        src = image.astype(np.float16).astype(np.float32)
+    else:
+        src = image.astype(np.float32)
+
+    # Half-texel aligned LOD0 bilinear
+    # Convert normalized UV to texel space with half-pixel offset
+    sx = u * width - 0.5
+    sy = v * height - 0.5
+
+    # Floor to get base texel indices
+    ix = int(np.floor(sx))
+    iy = int(np.floor(sy))
+
+    # Fractional parts for bilinear weights
+    fx = sx - ix
+    fy = sy - iy
+
+    # CLAMP_TO_EDGE addressing mode
+    x0 = max(0, min(ix, width - 1))
+    x1 = max(0, min(ix + 1, width - 1))
+    y0 = max(0, min(iy, height - 1))
+    y1 = max(0, min(iy + 1, height - 1))
+
+    # Fetch the 4 texels
+    c00 = src[y0, x0]
+    c10 = src[y0, x1]
+    c01 = src[y1, x0]
+    c11 = src[y1, x1]
+
+    # Bilinear interpolation
+    cx0 = c00 * (1.0 - fx) + c10 * fx
+    cx1 = c01 * (1.0 - fx) + c11 * fx
+    result = cx0 * (1.0 - fy) + cx1 * fy
+
+    return result
+
+
+def bilinear_filtering_centroid(native_image, shading_rate, use_fp16=False):
+    """
+    Policy: Bilinear Filtering Centroid
+    Faithfully simulates GPU VRS with LOD0 bilinear filtering:
+    - Representative sample at block center's pixel-center
+    - LOD0 bilinear with CLAMP_TO_EDGE, normalized UV
+    - Optional fp16 precision simulation (matches R16G16B16A16_FLOAT)
+
+    Args:
+        native_image: Input image in BGR format (uint8 or float)
+        shading_rate: Block size (2 for 2x2, 4 for 4x4)
+        use_fp16: If True, simulate fp16 texel storage and filtering
 
     Returns:
         Tuple of (simulated VRS image, sample count)
     """
     height, width, channels = native_image.shape
-    vrs_image = np.zeros_like(native_image)
+
+    # Convert to float and optionally simulate fp16 storage
+    if use_fp16:
+        vrs_image = np.zeros((height, width, channels), dtype=np.float32)
+        native_fp16 = native_image.astype(np.float16)
+    else:
+        vrs_image = np.zeros_like(native_image, dtype=np.float32)
+
     sample_count = 0
 
     for y in range(0, height, shading_rate):
@@ -205,15 +269,26 @@ def bilinear_filtering_centroid(native_image, shading_rate):
             block_height = min(shading_rate, height - y)
             block_width = min(shading_rate, width - x)
 
-            # Calculate the sub-pixel coordinate for the center of the block
-            center_x = x + (block_width - 1) / 2.0
-            center_y = y + (block_height - 1) / 2.0
+            # Block center's pixel-center coordinate
+            # This matches GPU shader behavior: center of the representative pixel
+            cx = x + (block_width - 1) / 2.0 + 0.5
+            cy = y + (block_height - 1) / 2.0 + 0.5
 
-            # Sample the color from that single point using bilinear interpolation
-            sampled_color = sample_bilinear(native_image, center_x, center_y)
+            # Convert to normalized UV coordinates [0, 1]
+            u = cx / width
+            v = cy / height
 
-            # Propagate that single color to the entire block
+            # LOD0 bilinear sample with CLAMP_TO_EDGE
+            sampled_color = sample_lod0_bilinear_uv(native_image, u, v, use_fp16)
+
+            # Broadcast the sampled color to the entire block
             vrs_image[y:y+block_height, x:x+block_width] = sampled_color
+
+    # Convert back to original dtype if needed
+    if native_image.dtype == np.uint8:
+        vrs_image = np.clip(vrs_image, 0, 255).astype(np.uint8)
+    elif use_fp16:
+        vrs_image = vrs_image.astype(np.float16).astype(native_image.dtype)
 
     return vrs_image, sample_count
 

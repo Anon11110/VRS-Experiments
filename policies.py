@@ -195,12 +195,7 @@ def sample_lod0_bilinear_uv(image, u, v, use_fp16=False):
     Returns:
         Bilinearly interpolated color
     """
-    height, width, channels = image.shape
-
-    if use_fp16:
-        src = image.astype(np.float16).astype(np.float32)
-    else:
-        src = image.astype(np.float32)
+    height, width = image.shape[:2]
 
     # Half-texel aligned LOD0 bilinear
     # Convert normalized UV to texel space with half-pixel offset
@@ -216,23 +211,44 @@ def sample_lod0_bilinear_uv(image, u, v, use_fp16=False):
     fy = sy - iy
 
     # CLAMP_TO_EDGE addressing mode
-    x0 = max(0, min(ix, width - 1))
-    x1 = max(0, min(ix + 1, width - 1))
-    y0 = max(0, min(iy, height - 1))
-    y1 = max(0, min(iy + 1, height - 1))
+    x0 = np.clip(ix, 0, width - 1)
+    x1 = np.clip(ix + 1, 0, width - 1)
+    y0 = np.clip(iy, 0, height - 1)
+    y1 = np.clip(iy + 1, 0, height - 1)
 
-    # Fetch the 4 texels
-    c00 = src[y0, x0]
-    c10 = src[y0, x1]
-    c01 = src[y1, x0]
-    c11 = src[y1, x1]
+    if use_fp16:
+        # --- FP16 (mediump) Simulation Path ---
+        calc_dtype = np.float16
+        fx_f = calc_dtype(fx)
+        fy_f = calc_dtype(fy)
+        one = calc_dtype(1.0)
 
-    # Bilinear interpolation
-    cx0 = c00 * (1.0 - fx) + c10 * fx
-    cx1 = c01 * (1.0 - fx) + c11 * fx
-    result = cx0 * (1.0 - fy) + cx1 * fy
+        c00 = image[y0, x0].astype(calc_dtype)
+        c10 = image[y0, x1].astype(calc_dtype)
+        c01 = image[y1, x0].astype(calc_dtype)
+        c11 = image[y1, x1].astype(calc_dtype)
 
-    return result
+        one_minus_fx = one - fx_f
+        one_minus_fy = one - fy_f
+
+        interp_y0 = c00 * one_minus_fx + c10 * fx_f
+        interp_y1 = c01 * one_minus_fx + c11 * fx_f
+
+        result = interp_y0 * one_minus_fy + interp_y1 * fy_f
+
+        return result.astype(np.float32)
+
+    else:
+        # --- FP32 (highp) Simulation Path ---
+        c00 = image[y0, x0].astype(np.float32)
+        c10 = image[y0, x1].astype(np.float32)
+        c01 = image[y1, x0].astype(np.float32)
+        c11 = image[y1, x1].astype(np.float32)
+
+        result = (c00 * (1.0 - fx) + c10 * fx) * (1.0 - fy) + \
+                 (c01 * (1.0 - fx) + c11 * fx) * fy
+
+        return result
 
 
 def bilinear_filtering_centroid(native_image, shading_rate, use_fp16=False):

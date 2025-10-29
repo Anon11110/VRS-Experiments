@@ -95,6 +95,38 @@ This generates two visualization files:
 
 The tool also outputs delta statistics including maximum and mean differences to help quantify the impact.
 
+#### Upsample Mode: VRS on Dynamic Post-Processing Passes
+
+For dynamic post-processing passes like upsampling shaders, use the `--upsample-mode` flag to simulate VRS behavior where the shader runs once per block:
+
+```bash
+# Simulate VRS on an upsampling pass
+python vrs_simulator.py \
+    --input "low_res_particle_texture.png" \
+    --pre-final "high_res_pre_final.png" \
+    --output "vrs_upsampled.png" \
+    -p "2x2_center_bilinear" \
+    --upsample-mode \
+    --fp16
+
+# Compare with hardware VRS output
+python vrs_simulator.py \
+    --input "low_res_texture.png" \
+    --pre-final "high_res_target.png" \
+    --hardware "hardware_vrs_output.png" \
+    --output "simulated_vrs.png" \
+    -p "2x2_center_bilinear" \
+    --upsample-mode \
+    --fp16 \
+    --save-delta delta.png
+```
+
+In upsample mode:
+- `--input`: The low-resolution texture to upsample
+- `--pre-final`: The high-resolution target image (required for shape and final blending)
+- The simulator runs the upsampling shader once per VRS block using the representative coordinate
+- The result is blended with the pre-final image to produce the final output
+
 ## Policy Descriptions
 
 ### Nearest-Neighbor Filtering Centroid (2x2_centroid_nearest_neighbor, 4x4_centroid_nearest_neighbor)

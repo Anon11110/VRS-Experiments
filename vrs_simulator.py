@@ -51,9 +51,150 @@ def main():
                         help="Path to save the delta/difference image between native and VRS result (optional)")
     parser.add_argument("--fp16", action="store_true",
                         help="Enable fp16 precision simulation for bilinear policies (matches R16G16B16A16_FLOAT)")
+    parser.add_argument("--upsample-mode", action="store_true",
+                        help="Run in Upsample Simulation mode for dynamic post-processing passes. "
+                             "'--input' is the low-res texture to upsample. "
+                             "'--pre-final' is the high-res target (required for shape and blending).")
 
     args = parser.parse_args()
 
+    # ========== UPSAMPLE MODE ==========
+    if args.upsample_mode:
+        print("Running in UPSAMPLE SIMULATION MODE.")
+        print("="*60)
+
+        if not args.pre_final:
+            print("Error: --upsample-mode requires --pre-final to be set.")
+            return 1
+
+
+        low_res_texture = cv2.imread(args.input)
+        if low_res_texture is None:
+            print(f"Error: Could not load low-res texture from {args.input}")
+            return 1
+
+        pre_final_image = cv2.imread(args.pre_final)
+        if pre_final_image is None:
+            print(f"Error: Could not load pre-final image from {args.pre_final}")
+            return 1
+
+        high_res_shape = pre_final_image.shape
+        print(f"  Low-res texture: {low_res_texture.shape}")
+        print(f"  High-res target: {high_res_shape}")
+
+        upsample_params = (low_res_texture, high_res_shape)
+        # Use low_res_texture as the native_image for policy calls
+        native_image = low_res_texture
+
+        hardware_image = None
+        if args.hardware:
+            hardware_image = cv2.imread(args.hardware)
+            if hardware_image is None:
+                print(f"Error: Could not load hardware VRS image from {args.hardware}")
+                return 1
+            if hardware_image.shape != high_res_shape:
+                print(f"Error: Hardware VRS image dimensions {hardware_image.shape} don't match high-res target {high_res_shape}")
+                return 1
+
+        # Run policy
+        print(f"\nRunning policy: {args.policy} (upsample mode)...")
+        if args.fp16:
+            print(f"  Using fp16 precision simulation (GPU-accurate R16G16B16A16_FLOAT)")
+
+        if args.policy == "2x2_centroid_nearest_neighbor":
+            vrs_delta, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=2, upsample_params=upsample_params, use_fp16=args.fp16)
+        elif args.policy == "4x4_centroid_nearest_neighbor":
+            vrs_delta, sample_count = policies.nearest_neighbor_filtering_centroid(native_image, shading_rate=4, upsample_params=upsample_params, use_fp16=args.fp16)
+        elif args.policy == "2x2_center_bilinear":
+            vrs_delta, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=2, use_fp16=args.fp16, upsample_params=upsample_params)
+        elif args.policy == "4x4_center_bilinear":
+            vrs_delta, sample_count = policies.bilinear_filtering_centroid(native_image, shading_rate=4, use_fp16=args.fp16, upsample_params=upsample_params)
+        elif args.policy == "2x2_corner_cycle":
+            vrs_delta, sample_count = policies.corner_cycling(native_image, shading_rate=2, phase=0, upsample_params=upsample_params, use_fp16=args.fp16)
+        elif args.policy == "4x4_corner_cycle":
+            vrs_delta, sample_count = policies.corner_cycling(native_image, shading_rate=4, phase=0, upsample_params=upsample_params, use_fp16=args.fp16)
+        elif args.policy == "2x2_corner_adaptive":
+            vrs_delta, sample_count = policies.content_adaptive_corner(native_image, shading_rate=2, upsample_params=upsample_params)
+        elif args.policy == "4x4_corner_adaptive":
+            vrs_delta, sample_count = policies.content_adaptive_corner(native_image, shading_rate=4, upsample_params=upsample_params)
+        elif args.policy == "2x2_gradient_centroid":
+            vrs_delta, sample_count = policies.gradient_centroid(native_image, shading_rate=2, upsample_params=upsample_params)
+        elif args.policy == "4x4_gradient_centroid":
+            vrs_delta, sample_count = policies.gradient_centroid(native_image, shading_rate=4, upsample_params=upsample_params)
+        elif args.policy == "2x2_minimum_gradient":
+            vrs_delta, sample_count = policies.minimum_gradient(native_image, shading_rate=2, upsample_params=upsample_params)
+        elif args.policy == "4x4_minimum_gradient":
+            vrs_delta, sample_count = policies.minimum_gradient(native_image, shading_rate=4, upsample_params=upsample_params)
+        elif args.policy == "2x2_maximum_gradient":
+            vrs_delta, sample_count = policies.maximum_gradient(native_image, shading_rate=2, upsample_params=upsample_params)
+        elif args.policy == "4x4_maximum_gradient":
+            vrs_delta, sample_count = policies.maximum_gradient(native_image, shading_rate=4, upsample_params=upsample_params)
+        else:
+            print(f"Error: Policy {args.policy} not supported")
+            return 1
+
+        # Calculate performance metrics
+        height, width, channels = high_res_shape
+        total_pixels = height * width
+        native_sample_count = total_pixels
+        shading_reduction = ((native_sample_count - sample_count) / native_sample_count) * 100
+
+        print("\n" + "="*60)
+        print("PERFORMANCE METRICS")
+        print("="*60)
+        print(f"High-res output pixels:       {native_sample_count:,}")
+        print(f"VRS shader invocations:       {sample_count:,}")
+        print(f"Shading Reduction:            {shading_reduction:.2f}%")
+        print(f"Speedup Factor:               {native_sample_count / sample_count:.2f}x")
+
+        # Blend with pre-final to get final image
+        print(f"\nBlending VRS upsample output with pre-final image...")
+        vrs_image = pre_final_image.astype(np.float32) + vrs_delta.astype(np.float32)
+        vrs_image = np.clip(vrs_image, 0, 255).astype(np.uint8)
+
+        # Quality metrics (if hardware provided)
+        if hardware_image is not None:
+            print("\n" + "="*60)
+            print("QUALITY METRICS COMPARISON")
+            print("="*60)
+            print(f"\nSimulated VRS ({args.policy}) vs Hardware VRS:")
+            print("-" * 60)
+            metrics_sim_vs_hw = calculate_metrics(hardware_image, vrs_image)
+            print(f"  MSE:  {metrics_sim_vs_hw['MSE']:8.2f}  (Lower is better)")
+            if metrics_sim_vs_hw['PSNR'] == float('inf'):
+                print(f"  PSNR:      ∞ dB  (Perfect match)")
+            else:
+                print(f"  PSNR: {metrics_sim_vs_hw['PSNR']:8.2f} dB  (Higher is better)")
+            print(f"  SSIM: {metrics_sim_vs_hw['SSIM']:8.4f}  (Higher is better, 1.0 is perfect)")
+
+        # Save output and delta visualization if requested
+        print("\n" + "="*60)
+        success = cv2.imwrite(args.output, vrs_image)
+        if success:
+            print(f"Success! Simulated VRS upsample image saved to {args.output}")
+        else:
+            print(f"Error: Could not save image to {args.output}")
+            return 1
+
+        if args.save_delta and hardware_image is not None:
+            diff = np.abs(hardware_image.astype(np.float32) - vrs_image.astype(np.float32))
+            max_diff = np.max(diff)
+            mean_diff = np.mean(diff)
+
+            print(f"\nDelta Image Statistics:")
+            print(f"  Max difference: {max_diff:.2f}")
+            print(f"  Mean difference: {mean_diff:.2f}")
+
+            amplification_factor = 5.0
+            diff_amplified = np.clip(diff * amplification_factor, 0, 255).astype(np.uint8)
+            delta_success = cv2.imwrite(args.save_delta, diff_amplified)
+
+            if delta_success:
+                print(f"Delta image saved to {args.save_delta} (amplified {amplification_factor}x)")
+
+        return 0
+
+    # ========== STANDARD MODE ==========
     native_image = cv2.imread(args.input)
     if native_image is None:
         print(f"Error: Could not load image from {args.input}")

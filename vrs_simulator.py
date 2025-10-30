@@ -68,12 +68,12 @@ def main():
             return 1
 
 
-        low_res_texture = cv2.imread(args.input)
+        low_res_texture = cv2.imread(args.input, cv2.IMREAD_UNCHANGED)
         if low_res_texture is None:
             print(f"Error: Could not load low-res texture from {args.input}")
             return 1
 
-        pre_final_image = cv2.imread(args.pre_final)
+        pre_final_image = cv2.imread(args.pre_final, cv2.IMREAD_UNCHANGED)
         if pre_final_image is None:
             print(f"Error: Could not load pre-final image from {args.pre_final}")
             return 1
@@ -88,7 +88,7 @@ def main():
 
         hardware_image = None
         if args.hardware:
-            hardware_image = cv2.imread(args.hardware)
+            hardware_image = cv2.imread(args.hardware, cv2.IMREAD_UNCHANGED)
             if hardware_image is None:
                 print(f"Error: Could not load hardware VRS image from {args.hardware}")
                 return 1
@@ -195,14 +195,14 @@ def main():
         return 0
 
     # ========== STANDARD MODE ==========
-    native_image = cv2.imread(args.input)
+    native_image = cv2.imread(args.input, cv2.IMREAD_UNCHANGED)
     if native_image is None:
         print(f"Error: Could not load image from {args.input}")
         return 1
 
     # Delta mode: compute the final pass contribution
     if args.pre_final:
-        pre_final_image = cv2.imread(args.pre_final)
+        pre_final_image = cv2.imread(args.pre_final, cv2.IMREAD_UNCHANGED)
         if pre_final_image is None:
             print(f"Error: Could not load pre-final pass image from {args.pre_final}")
             return 1
@@ -228,7 +228,7 @@ def main():
     hardware_image = None
     hardware_image_original = None
     if args.hardware:
-        hardware_image_original = cv2.imread(args.hardware)
+        hardware_image_original = cv2.imread(args.hardware, cv2.IMREAD_UNCHANGED)
         if hardware_image_original is None:
             print(f"Error: Could not load hardware VRS image from {args.hardware}")
             return 1
@@ -383,7 +383,7 @@ def main():
     # Save delta image if requested
     if args.save_delta:
         if args.pre_final:
-            original_native_image = cv2.imread(args.input)
+            original_native_image = cv2.imread(args.input, cv2.IMREAD_UNCHANGED)
         else:
             original_native_image = native_image
 

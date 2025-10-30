@@ -41,7 +41,9 @@ def main():
                                  "2x2_corner_adaptive", "4x4_corner_adaptive",
                                  "2x2_gradient_centroid", "4x4_gradient_centroid",
                                  "2x2_minimum_gradient", "4x4_minimum_gradient",
-                                 "2x2_maximum_gradient", "4x4_maximum_gradient"],
+                                 "2x2_maximum_gradient", "4x4_maximum_gradient",
+                                 "2x2_hardware_bilinear", "4x4_hardware_bilinear",
+                                 "2x2_hardware_nearest", "4x4_hardware_nearest"],
                         help="VRS policy to apply")
     parser.add_argument("-hw", "--hardware", type=str,
                         help="Path to hardware VRS image for comparison (optional)")
@@ -55,8 +57,13 @@ def main():
                         help="Run in Upsample Simulation mode for dynamic post-processing passes. "
                              "'--input' is the low-res texture to upsample. "
                              "'--pre-final' is the high-res target (required for shape and blending).")
+    parser.add_argument("--center-offset-x", type=float, default=0.0,
+                        help="Hardware VRS center offset X (typical values: -0.5, 0.0, +0.5)")
+    parser.add_argument("--center-offset-y", type=float, default=0.0,
+                        help="Hardware VRS center offset Y (typical values: -0.5, 0.0, +0.5)")
 
     args = parser.parse_args()
+    center_offset = (args.center_offset_x, args.center_offset_y)
 
     # ========== UPSAMPLE MODE ==========
     if args.upsample_mode:
@@ -129,6 +136,14 @@ def main():
             vrs_delta, sample_count = policies.maximum_gradient(native_image, shading_rate=2, upsample_params=upsample_params)
         elif args.policy == "4x4_maximum_gradient":
             vrs_delta, sample_count = policies.maximum_gradient(native_image, shading_rate=4, upsample_params=upsample_params)
+        elif args.policy == "2x2_hardware_bilinear":
+            vrs_delta, sample_count = policies.hardware_center_vrs(native_image, shading_rate=2, center_offset=center_offset, filter_mode="bilinear", upsample_params=upsample_params, use_fp16=args.fp16)
+        elif args.policy == "4x4_hardware_bilinear":
+            vrs_delta, sample_count = policies.hardware_center_vrs(native_image, shading_rate=4, center_offset=center_offset, filter_mode="bilinear", upsample_params=upsample_params, use_fp16=args.fp16)
+        elif args.policy == "2x2_hardware_nearest":
+            vrs_delta, sample_count = policies.hardware_center_vrs(native_image, shading_rate=2, center_offset=center_offset, filter_mode="nearest", upsample_params=upsample_params)
+        elif args.policy == "4x4_hardware_nearest":
+            vrs_delta, sample_count = policies.hardware_center_vrs(native_image, shading_rate=4, center_offset=center_offset, filter_mode="nearest", upsample_params=upsample_params)
         else:
             print(f"Error: Policy {args.policy} not supported")
             return 1
@@ -281,6 +296,14 @@ def main():
         vrs_image, sample_count = policies.maximum_gradient(native_image, shading_rate=2)
     elif args.policy == "4x4_maximum_gradient":
         vrs_image, sample_count = policies.maximum_gradient(native_image, shading_rate=4)
+    elif args.policy == "2x2_hardware_bilinear":
+        vrs_image, sample_count = policies.hardware_center_vrs(native_image, shading_rate=2, center_offset=center_offset, filter_mode="bilinear", use_fp16=args.fp16)
+    elif args.policy == "4x4_hardware_bilinear":
+        vrs_image, sample_count = policies.hardware_center_vrs(native_image, shading_rate=4, center_offset=center_offset, filter_mode="bilinear", use_fp16=args.fp16)
+    elif args.policy == "2x2_hardware_nearest":
+        vrs_image, sample_count = policies.hardware_center_vrs(native_image, shading_rate=2, center_offset=center_offset, filter_mode="nearest")
+    elif args.policy == "4x4_hardware_nearest":
+        vrs_image, sample_count = policies.hardware_center_vrs(native_image, shading_rate=4, center_offset=center_offset, filter_mode="nearest")
     else:
         print(f"Error: Unknown policy {args.policy}")
         return 1

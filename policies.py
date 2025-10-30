@@ -784,3 +784,118 @@ def maximum_gradient(native_image, shading_rate, upsample_params=None):
         vrs_image = vrs_image.astype(np.uint8)
 
     return vrs_image, sample_count
+
+
+def hardware_center_vrs(native_image,
+                        shading_rate,                     # 2 for 2x2, 4 for 4x4
+                        center_offset=(0.0, 0.0),         # (ox, oy), hardware-scaled per rate
+                        filter_mode="bilinear",           # "bilinear" or "nearest"
+                        upsample_params=None,
+                        use_fp16=False):
+    """
+    Hardware-accurate VRS sampling (BCI-style):
+      • Snap to 2N×2N coarse-quad grid (N = shading_rate).
+      • Inside each coarse quad, iterate coarse pixels of size N×N.
+      • Representative location = coarse-pixel center + scaled center_offset.
+      • Sample once at LOD 0 using the chosen filter, broadcast to the coarse pixel.
+
+    Works for both Standard mode (sample_native→write_native) and
+    Upsample mode (sample_lowres→write_highres).
+
+    Args:
+        native_image: Input image in BGR format (low-res texture in upsample mode)
+        shading_rate: Block size (2 for 2x2, 4 for 4x4)
+        center_offset: Tuple (ox, oy) for hardware center offset (typ. -0.5, 0.0, +0.5)
+        filter_mode: "bilinear" or "nearest" for texture sampling
+        upsample_params: Optional tuple of (low_res_image, high_res_shape) for upsample mode
+        use_fp16: If True, simulate fp16 precision (bilinear mode only)
+
+    Returns:
+        Tuple of (simulated VRS image, sample count)
+    """
+    if upsample_params:
+        low_res_image, high_res_shape = upsample_params
+        out_h, out_w, out_c = high_res_shape
+        vrs_image = np.zeros((out_h, out_w, out_c), dtype=np.float32)
+        sample_image = low_res_image
+        src_h, src_w = low_res_image.shape[:2]
+    else:
+        out_h, out_w, out_c = native_image.shape
+        vrs_image = np.zeros((out_h, out_w, out_c), dtype=np.float32)
+        sample_image = native_image
+        src_h, src_w = out_h, out_w
+
+    # Hardware grids
+    N = int(shading_rate)
+    assert N in (2, 4), "hardware_center_vrs supports 2x2 or 4x4"
+    coarse_quad_stride = 2 * N
+
+    # Center offset scaling per spec (2x2→*2, 4x4→*4)
+    offset_scale = coarse_quad_stride // 2
+    # Keep as float to support future sub-pixel experiments
+    ox_f = center_offset[0] * offset_scale
+    oy_f = center_offset[1] * offset_scale
+
+    def sample_at_center(cx, cy):
+        """
+        cx, cy are in OUTPUT pixel coordinates (float OK).
+        - Bilinear: use normalized UV from output dims.
+        - Nearest: map UV to source texel center via round(u*W - 0.5).
+        """
+        u = (cx + 0.5) / float(out_w)
+        v = (cy + 0.5) / float(out_h)
+
+        if filter_mode == "nearest":
+            # Match point sampling at texel centers
+            sx = int(np.round(u * src_w - 0.5))
+            sy = int(np.round(v * src_h - 0.5))
+            sx = int(np.clip(sx, 0, src_w - 1))
+            sy = int(np.clip(sy, 0, src_h - 1))
+            return sample_image[sy, sx].astype(np.float32)
+        else:
+            # Bilinear LOD0 in source, using normalized UVs
+            return sample_lod0_bilinear_uv(sample_image, u, v, use_fp16=use_fp16)
+
+    sample_count = 0
+
+    # Iterate by coarse quads (guarantees 2N×2N snapping)
+    for qy in range(0, out_h, coarse_quad_stride):
+        for qx in range(0, out_w, coarse_quad_stride):
+            # Defensive re-snap (qx,qy should already be aligned)
+            coarse_quad_ulc_x = qx & ~(coarse_quad_stride - 1)
+            coarse_quad_ulc_y = qy & ~(coarse_quad_stride - 1)
+
+            # Then by coarse pixels (N×N) inside each quad.
+            for py in (0, N):
+                for px in (0, N):
+                    coarse_px_ulc_x = coarse_quad_ulc_x + px
+                    coarse_px_ulc_y = coarse_quad_ulc_y + py
+
+                    # Clamp block extents at image edges
+                    block_w = min(N, out_w - coarse_px_ulc_x)
+                    block_h = min(N, out_h - coarse_px_ulc_y)
+                    if block_w <= 0 or block_h <= 0:
+                        continue
+
+                    # Base center: 2x2→ULC+(1,1); 4x4→ULC+(2,2)
+                    cx = coarse_px_ulc_x + (N * 0.5) + ox_f   # float center
+                    cy = coarse_px_ulc_y + (N * 0.5) + oy_f
+
+                    # Clamp center inside the (possibly truncated) coarse pixel
+                    min_cx = coarse_px_ulc_x
+                    max_cx = coarse_px_ulc_x + block_w - 1
+                    min_cy = coarse_px_ulc_y
+                    max_cy = coarse_px_ulc_y + block_h - 1
+                    cx = float(np.clip(cx, min_cx, max_cx))
+                    cy = float(np.clip(cy, min_cy, max_cy))
+
+                    # One texture sample → broadcast to coarse pixel block
+                    color = sample_at_center(cx, cy)
+                    vrs_image[coarse_px_ulc_y:coarse_px_ulc_y + block_h,
+                              coarse_px_ulc_x:coarse_px_ulc_x + block_w] = color
+                    sample_count += 1
+
+    if not upsample_params and native_image.dtype == np.uint8:
+        vrs_image = np.clip(vrs_image, 0, 255).astype(np.uint8)
+
+    return vrs_image, sample_count

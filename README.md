@@ -31,6 +31,8 @@ All policies support both 2x2 and 4x4 block sizes:
 5. **`2x2_gradient_centroid`** / **`4x4_gradient_centroid`** - Dynamic gradient centroid sampling
 6. **`2x2_minimum_gradient`** / **`4x4_minimum_gradient`** - Minimum gradient magnitude sampling (safest/most robust)
 7. **`2x2_maximum_gradient`** / **`4x4_maximum_gradient`** - Maximum gradient magnitude sampling (edge-preserving but risky)
+8. **`2x2_hardware_bilinear`** / **`4x4_hardware_bilinear`** - Hardware-accurate VRS with bilinear filtering
+9. **`2x2_hardware_nearest`** / **`4x4_hardware_nearest`** - Hardware-accurate VRS with nearest-neighbor filtering
 
 ### Examples
 
@@ -127,6 +129,37 @@ In upsample mode:
 - The simulator runs the upsampling shader once per VRS block using the representative coordinate
 - The result is blended with the pre-final image to produce the final output
 
+#### Hardware-Accurate VRS Mode
+
+For precise validation against GPU hardware captures, use the hardware-accurate policies that replicate hardware selection rules:
+
+```bash
+# Standard mode with hardware-accurate 2x2 VRS (bilinear)
+python vrs_simulator.py -i native.png -o out.png -p 2x2_hardware_bilinear
+
+# Hardware-accurate 4x4 VRS with nearest-neighbor filtering
+python vrs_simulator.py -i native.png -o out.png -p 4x4_hardware_nearest
+
+# Upsample mode with hardware-accurate VRS and fp16 precision
+python vrs_simulator.py --upsample-mode -i low.png --pre-final high.png \
+    -o out.png -p 2x2_hardware_bilinear --fp16
+
+# With center offsets (adjust to match hardware DB_SPI_VRS_CENTER_LOCATION)
+python vrs_simulator.py -i native.png -o out.png -p 2x2_hardware_bilinear \
+    --center-offset-x 0.5 --center-offset-y -0.5
+```
+
+**Hardware Policy Features:**
+- **2N×2N Coarse-Quad Snapping**: Snaps to 4×4 grid for 2×2 VRS, 8×8 grid for 4×4 VRS
+- **Coarse Pixel Centers**: 2×2 → ULC+(1,1), 4×4 → ULC+(2,2)
+- **Center Offsets**: `--center-offset-x` and `--center-offset-y` (typical values: -0.5, 0.0, +0.5)
+  - 2×2 VRS: offset scaled by 2
+  - 4×4 VRS: offset scaled by 4
+- **Filter Mode**: Bilinear (LOD0) or Nearest-neighbor matching shader sampler state
+- **Edge Clamping**: Handles truncated blocks at image boundaries correctly
+
+These policies are designed for pixel-perfect matching with hardware VRS captures when the sampler state and center offsets are configured correctly.
+
 ## Policy Descriptions
 
 ### Nearest-Neighbor Filtering Centroid (2x2_centroid_nearest_neighbor, 4x4_centroid_nearest_neighbor)
@@ -156,3 +189,18 @@ In upsample mode:
 ### Maximum Gradient (4x4_maximum_gradient)
 - **Description**: Selects pixel with maximum gradient
 - **Sampling**: Uses GPU-style ddx/ddy derivatives to calculate gradient magnitude, selects pixel with maximum gradient (edge/detail pixel)
+
+### Hardware-Accurate Bilinear (2x2_hardware_bilinear, 4x4_hardware_bilinear)
+- **Description**: hardware-accurate VRS with LOD0 bilinear filtering
+- **Sampling**:
+  - Snaps to 2N×2N coarse-quad grid (4×4 for 2×2, 8×8 for 4×4)
+  - Samples at coarse pixel center with programmable offset
+  - Uses GPU-accurate LOD0 bilinear filtering with CLAMP_TO_EDGE
+
+### Hardware-Accurate Nearest (2x2_hardware_nearest, 4x4_hardware_nearest)
+- **Description**: hardware-accurate VRS with nearest-neighbor filtering
+- **Sampling**:
+  - Snaps to 2N×2N coarse-quad grid (4×4 for 2×2, 8×8 for 4×4)
+  - Samples at coarse pixel center with programmable offset
+  - Uses nearest-neighbor filtering
+  - With default (0,0) offsets at integer centers, produces identical results to bilinear mode

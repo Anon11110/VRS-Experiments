@@ -200,12 +200,28 @@ def main():
             print(f"  Max difference: {max_diff:.2f}")
             print(f"  Mean difference: {mean_diff:.2f}")
 
+            # Amplified visualization
             amplification_factor = 5.0
             diff_amplified = np.clip(diff * amplification_factor, 0, 255).astype(np.uint8)
+
+            # Heatmap visualization
+            diff_gray = np.mean(diff, axis=2)  # Average across color channels
+            diff_normalized = (diff_gray / max_diff * 255).astype(np.uint8) if max_diff > 0 else np.zeros_like(diff_gray, dtype=np.uint8)
+            diff_heatmap = cv2.applyColorMap(diff_normalized, cv2.COLORMAP_JET)
+
             delta_success = cv2.imwrite(args.save_delta, diff_amplified)
+
+            heatmap_path = args.save_delta.rsplit('.', 1)
+            if len(heatmap_path) == 2:
+                heatmap_path = f"{heatmap_path[0]}_heatmap.{heatmap_path[1]}"
+            else:
+                heatmap_path = f"{args.save_delta}_heatmap"
+            heatmap_success = cv2.imwrite(heatmap_path, diff_heatmap)
 
             if delta_success:
                 print(f"Delta image saved to {args.save_delta} (amplified {amplification_factor}x)")
+                if heatmap_success:
+                    print(f"Delta heatmap saved to {heatmap_path}")
 
         return 0
 
